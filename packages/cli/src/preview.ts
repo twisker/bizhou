@@ -9,7 +9,7 @@
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { extname, join } from "node:path";
+import { extname, join, resolve } from "node:path";
 import type { PreviewKind } from "@bizhou/core";
 
 const IMAGE_EXT = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".heic"]);
@@ -46,6 +46,8 @@ export async function generatePreview(
 ): Promise<{ kind: PreviewKind; data: Buffer } | null> {
   const kind = detectKind(sourcePath);
   if (!kind) return null;
+  // 绝对路径：防止以 - 开头的文件名被 ffmpeg 当作开关解析。
+  const src = resolve(sourcePath);
   const work = await mkdtemp(join(tmpdir(), "bizhou-prev-"));
   try {
     if (kind === "image" || kind === "video") {
@@ -53,14 +55,14 @@ export async function generatePreview(
       const vf = "scale=320:-1";
       const args =
         kind === "video"
-          ? ["-i", sourcePath, "-ss", "00:00:01", "-vframes", "1", "-vf", vf, out]
-          : ["-i", sourcePath, "-vf", vf, out];
+          ? ["-i", src, "-ss", "00:00:01", "-vframes", "1", "-vf", vf, out]
+          : ["-i", src, "-vf", vf, out];
       await runFfmpeg(args);
       return { kind, data: await readFile(out) };
     }
     // audio → 前 15 秒 64k mp3 片段
     const out = join(work, "clip.mp3");
-    await runFfmpeg(["-i", sourcePath, "-t", "15", "-b:a", "64k", out]);
+    await runFfmpeg(["-i", src, "-t", "15", "-b:a", "64k", out]);
     return { kind, data: await readFile(out) };
   } catch {
     return null; // ffmpeg 缺失或失败：静默跳过预览（不阻断上传）

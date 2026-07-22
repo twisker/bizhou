@@ -6,6 +6,7 @@
 
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
+import { resolve } from "node:path";
 import { BizhouError } from "@bizhou/core";
 
 const CANDIDATES = ["7z", "7za", "7zz"];
@@ -39,13 +40,18 @@ export function sevenZipArchive(
   inputPaths: string[],
   password: string,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const args = ["a", "-t7z", "-mhe=on", `-p${password}`, outArchive, ...inputPaths];
+  // 防参数注入：
+  // 1) 用绝对路径（以 / 开头，绝不会被当成开关）——文件名来自解密后的原名，可能被攻击者构造为 -xxx。
+  // 2) 用 7z 的 `--` 停止开关解析，其后一律按位置参数（文件）处理。
+  const outAbs = resolve(outArchive);
+  const inAbs = inputPaths.map((p) => resolve(p));
+  return new Promise((resolvePromise, reject) => {
+    const args = ["a", "-t7z", "-mhe=on", `-p${password}`, "--", outAbs, ...inAbs];
     const p = spawn(bin, args, { stdio: "ignore" });
     p.on("error", reject);
     p.on("close", (code) =>
       code === 0
-        ? resolve()
+        ? resolvePromise()
         : reject(new BizhouError("IO", `7z 打包失败（退出码 ${code}）`)),
     );
   });
