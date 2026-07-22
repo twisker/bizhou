@@ -4,6 +4,16 @@
 
 ---
 
+## 当前测试结果（2026-07-23）
+
+- `bun test`：**73 项全绿**（8 文件），`pnpm run typecheck` 双包通过。
+- 测试文件：`packages/core/test/{crypto,base32,vault,bundle,resource,baidu,account,preview}.test.ts`、`packages/cli/test/cli.test.ts`。
+- 关键覆盖：AES-GCM 往返 + 篡改/错密钥/AAD 失败、KDF/信封、vault 双路解锁 + 改密、manifest 严格校验、**资源 pack→unpack 字节级往返**（单/多片/整除/空/gzip/3MB/内存 store）、篡改分片与错 MK 被拒、百度上传编排（partseq/md5/断点续传/errno）+ 模拟网盘端到端、多账号 + 设备密钥加密落盘、预览加密往返。
+- 端到端实测（真实 `bz` 二进制，离线 `--local`）：push→pull 字节级一致、篡改被拒、错主密码被拒、ffmpeg 预览生成→加密→还原为有效 JPEG。
+- 未自动化（需真实百度联网/账号）：M0 联网往返、QPS 实测、真实 >4GB + 断点续传、第三方 7-Zip 解密验证。
+
+---
+
 ## 通用测试规范
 
 | 规范 | 要求 |

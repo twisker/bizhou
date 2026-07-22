@@ -81,8 +81,34 @@ bizhou/
 
 ## 前置准备
 
-1. 安装 [Bun](https://bun.sh)（主运行时；核心库亦兼容 Node LTS）。
-2. 自备**百度网盘开放平台应用凭证**（AppKey/SecretKey）——工具不内嵌任何凭证。见 `人工TODO事项.md` H-01。
+1. 安装 [Bun](https://bun.sh)（主运行时；核心库亦兼容 Node LTS）与 pnpm。
+2. 自备**百度网盘开放平台应用凭证**（AppKey/SecretKey）——工具不内嵌任何凭证。`cp .env.example .env` 后填入。
+
+## 开发与测试
+
+```bash
+pnpm install            # 安装 workspace 依赖
+pnpm run typecheck      # 两包 TypeScript 类型检查
+bun test               # 运行全部测试（当前 73 项全绿）
+```
+
+离线体验（用本地目录代替百度网盘，无需登录/网络）：
+
+```bash
+IDX=packages/cli/src/index.ts
+export BIZHOU_CONFIG_DIR=/tmp/bz-demo BIZHOU_MASTER_PASSWORD=demo-pass
+bun $IDX init
+bun $IDX push ./任意文件.pdf --local /tmp/bz-store --compress
+bun $IDX ls   --local /tmp/bz-store
+bun $IDX pull <资源ID> --local /tmp/bz-store --out /tmp/bz-out   # 还原字节级一致
+```
+
+联网使用则先 `bun $IDX login`（OAuth），之后 push/pull 省略 `--local` 即走百度网盘。
+
+## 状态
+
+- ✅ **已完成（离线可验证）**：加密内核（AES-256-GCM 信封 + scrypt + MK/恢复密钥）、bundle/manifest、分片器、完整加密往返（字节级一致）、百度对接层（mock 测试）、多账号、CLI 全命令、ffmpeg 预览、7z-AES 导出、三平台 CI。
+- ⏳ **待人工联网验证**：M0 真实 OAuth + 上传/下载往返 + 确认云端不限制加密大文件、QPS/配额实测、真实 >4GB 断点续传、第三方 7-Zip 解密验证。见 `人工TODO事项.md`。
 
 ## 路线图
 

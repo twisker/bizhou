@@ -4,44 +4,57 @@
 
 **存档：** 每个 Sprint 结束后，本文件内容完整复制到 `.claude/archive/` 下、以 Sprint 名命名的新 md 文件留存，随后按下一个 Sprint 重新初始化。
 
-**同步：** 任务表中责任人为"人工"的任务，须与根目录 `人工TODO事项.md` 双向同步。人工完成后同时更新两处状态。
+**同步：** 任务表中责任人为"人工"的任务，须与根目录 `人工TODO事项.md` 双向同步。
 
 ---
 
-## 当前 Sprint：Sprint 0（项目初始化 + M0 技术验证）
+## 当前 Sprint：Sprint 0（初始化 + M0）→ Phase 1（M1）核心已完成
 
 **最后更新：** 2026-07-23
-**当前目标：** 完成协作框架初始化；接下来搭 pnpm monorepo 工程骨架并开展 M0 技术验证（OAuth + 上传/下载往返字节一致 + 云端不限制加密大文件）。
+**当前目标：** 离线可验证的加密引擎 + CLI 已全部打通并测试通过；剩余为**需真实百度联网**的 M0 验证与少量增强。
 
-### 任务状态
+### 已完成（AI 自主推进，字节级往返一致性已证）
 
-| 优先级 | 任务 | 所属模块 | 责任人 | 状态 |
-|-------|------|----------|--------|------|
-| — | 协作框架初始化（README/CLAUDE.md/.claude/ 登记表/版本钩子） | 工程 | AI | ✅ 已完成 |
-| P0 | 申请/配置百度开放平台应用凭证 + `/apps/bizhou/` 沙盒 | baidu / 外部 | 人工 | ⏳ 待开始 |
-| P0 | 初始化 pnpm monorepo（core + cli + tsconfig + Bun/Node 兼容） | 工程 | AI | ⏳ 待开始 |
-| P0 | 配置 lint + `bun test` + 类型检查 | 工程 | AI | ⏳ 待开始 |
-| P0 | 配置 CI（三平台矩阵，不触真实网盘） | CI/CD | AI | ⏳ 待开始 |
-| P0 | M0-Spike：OAuth token → precreate/superfile2/create → 下载字节一致 | baidu | AI | ⏳ 待开始 |
-| P0 | M0 关键验证：加密大文件不被云端限制 | baidu / 人工 | 人工 | ⏳ 待开始 |
-| P1 | 实测 QPS/配额/限流并记录 | baidu | 人工 | ⏳ 待开始 |
+| 模块 | 说明 | 源码 | 状态 |
+|------|------|------|------|
+| crypto | AES-256-GCM 信封、scrypt KDF(NFKC)、wrap/unwrap、base32 | `packages/core/src/crypto/` | ✅ 稳定 |
+| vault | MK 主密钥 + 主密码/恢复密钥双路解锁 + 改密 | `packages/core/src/vault/` | ✅ 稳定 |
+| bundle | manifest v1、encMeta、不透明 ID、严格校验 | `packages/core/src/bundle/` | ✅ 稳定 |
+| chunker | 分片(可选 gzip)加密/还原、AAD 绑定、内存与文件大小解耦 | `packages/core/src/chunker/` | ✅ 稳定 |
+| store | BundleStore 抽象 + Local/Memory 实现 | `packages/core/src/store/` | ✅ 稳定 |
+| resource | packResource/unpackResource/openPreview 编排 | `packages/core/src/resource/` | ✅ 稳定 |
+| baidu | OAuth2 + precreate/superfile2/create/list/download + BaiduBundleStore | `packages/core/src/baidu/` | ✅ 代码完成（联网待验） |
+| account/keystore/config | 多账号、设备密钥加密 SecretStore、配置目录 | `packages/core/src/{account,keystore,config}/` | ✅ 稳定 |
+| CLI `bz` | init/unlock/lock/passwd/recover/login/logout/account/push/pull/ls/info/rm/share/preview | `packages/cli/src/` | ✅ 稳定（离线实测） |
+| preview | ffmpeg 图片/视频缩略、音频片段 → DEK 加密 | `packages/cli/src/preview.ts` | ✅ 实测 |
+| export7z | 头部加密 7z-AES 导出（需 7z 二进制） | `packages/cli/src/export7z.ts` | ✅ 代码完成（本机无 7z） |
+| CI | 三平台 typecheck + bun test | `.github/workflows/ci.yml` | ✅ |
 
-### 模块状态
+**测试：** `bun test` 73 项全绿；`pnpm run typecheck` 双包通过。CLI 端到端实测：push→pull 字节级一致、篡改分片被拒、错主密码被拒、ffmpeg 预览往返有效 JPEG。
 
-| 模块 | 状态 | 备注 |
-|------|------|------|
-| 协作框架（.claude/） | 稳定 | 本次初始化生成 |
-| 版本钩子（VERSION/scripts/.githooks） | 稳定 | pre-commit 自动 patch 已激活 |
-| packages/core | 待开始 | 骨架未建 |
-| packages/cli | 待开始 | 骨架未建 |
-| baidu 对接 | 待开始 | 依赖人工提供应用凭证 |
+### 待办（需人工/联网）
 
-### 活跃文件清单
-
-> 当前无进行中的源码改动。开始 Sprint 0 工程任务后在此登记正在修改的文件，防止冲突。
+| 优先级 | 任务 | 责任人 | 状态 |
+|-------|------|--------|------|
+| P0 | M0 关键验证：真实 OAuth token → 上传/下载往返字节一致 → 确认云端不限制加密大文件 | 人工（H-02） | ⏳ 待联网 |
+| P1 | 实测 QPS/配额/限流，据此调并发与退避 | 人工（H-03） | ⏳ 待联网 |
+| P2 | 真实 >4GB 大文件 + 断点续传联网实测（逻辑已实现并单测） | 人工 | ⏳ 待联网 |
+| P2 | 发布：npm publish @bizhou/core + Homebrew/Scoop（需构建产物 + 渠道账号 H-05） | AI+人工 | 待启动 |
 
 ### 近期重要改动记录
 
-| 时间 | 改动目的 | 涉及模块/文件 |
-|------|---------|--------------|
-| 2026-07-23 | 初始化 AI-Human 协作框架（README、CLAUDE.md、.claude/ 全套登记表、版本管理钩子、LICENSE） | 根目录 + `.claude/` + `scripts/` + `.githooks/` |
+| 时间 | 改动目的 | 涉及模块 |
+|------|---------|---------|
+| 2026-07-23 | 搭 monorepo + crypto 内核（信封/KDF/wrap）58 测试 | crypto/errors |
+| 2026-07-23 | vault 主密钥架构 + base32 恢复密钥 | vault |
+| 2026-07-23 | bundle/manifest v1 + encMeta + 严格校验 | bundle |
+| 2026-07-23 | 分片器 + 资源编排：完整加密往返（字节级一致） | chunker/store/resource |
+| 2026-07-23 | 百度 OAuth + 文件 API + BaiduBundleStore（mock 测试） | baidu |
+| 2026-07-23 | 配置/设备密钥 SecretStore/多账号 | config/keystore/account |
+| 2026-07-23 | CLI bz 全命令 + 端到端实测 | packages/cli |
+| 2026-07-23 | ffmpeg 预览 + 7z-AES 导出 | cli/preview,export7z |
+| 2026-07-23 | 三平台 CI + agent Skill | .github, cli/skill |
+
+### 活跃文件清单
+
+> 当前无进行中的半成品改动；已提交至 feature/init_proj。

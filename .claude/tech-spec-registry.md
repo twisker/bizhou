@@ -55,12 +55,14 @@
 
 | 接口 | 用途 | 状态 |
 |------|------|------|
-| OAuth 2.0（授权码 / device-code） | 获取/刷新 access token | 待验证（M0） |
-| `xpan/file` · precreate | 预创建、拿 `uploadid` | 待验证（M0） |
-| `pcs/superfile2` | 逐 4MB 分片上传（`partseq`） | 待验证（M0） |
-| `xpan/file` · create | 合并落盘到 `/apps/bizhou/<bundle>/NNN.part` | 待验证（M0） |
-| `xpan/file` · list | 列出 `/apps/bizhou/` 下的 bundle | 待验证（M1） |
-| download（dlink / 下载接口） | 下载分片与预览包 | 待验证（M1） |
+| OAuth 2.0（授权码 / device-code） | 获取/刷新 access token | 已实现（mock 测试），联网待验（M0） |
+| `xpan/file` · precreate | 预创建、拿 `uploadid` | 已实现（mock 测试），联网待验 |
+| `pcs/superfile2` | 逐 4MB 分片上传（`partseq`） | 已实现（mock 测试），联网待验 |
+| `xpan/file` · create | 合并落盘到 `/apps/bizhou/<bundle>/NNN.part` | 已实现（mock 测试），联网待验 |
+| `xpan/file` · list | 列出 `/apps/bizhou/` 下的 bundle | 已实现，联网待验 |
+| `xpan/multimedia` · filemetas + dlink | 取下载直链 | 已实现，联网待验 |
+| `xpan/file` · filemanager(delete) | 删除资源 | 已实现，联网待验 |
+| download（dlink） | 下载分片与预览包 | 已实现，联网待验 |
 
 **沙盒约束**：应用只能操作 `/apps/bizhou/` 单一目录。
 **单文件上限**：普通用户 4GB / SVIP 20GB → 用 100MB 逻辑分片规避。
@@ -68,6 +70,23 @@
 **QPS/配额**：官方未公开，**M0 实测**后据此设并发与退避策略。
 
 ---
+
+## 5.1 密钥架构定稿（AI 自主决策留痕）
+
+对 PRD §7 信封加密的稳健化落地，已实现于 `packages/core/src/vault`：
+
+```
+主密码 ──scrypt(N=2^15,r=8,p=1,NFKC,加盐)──▶ KEK_pw ─┐
+                                                      ├─包裹─▶ MK（随机主密钥）──包裹─▶ 各资源 DEK
+恢复密钥(32B 随机, base32 展示) = KEK_rk ──────────────┘
+```
+
+- **MK 间接层**：引入随机主密钥 MK，只生成一次；每个资源 DEK 由 MK 包裹后存 `manifest.wrappedKey`。
+- **双路解锁**：MK 分别被 KEK_pw 与恢复密钥各包裹一份，存本地 `vault.json`（明文安全——只含被包裹密钥）。
+- **改主密码**只需重裹 MK，不动任何资源 manifest；忘主密码用恢复密钥解 MK 再重设。
+- **与 PRD 差异**：原 PRD 将 DEK 直接用主密码 KEK 包裹、KDF/盐入 manifest；现改为 DEK 由 MK 包裹、KDF/盐入 vault，故 manifest 不再含 kdf/salt。差异已在此登记。
+- **分片 AAD**：每分片以 `bundleId:seq` 作为 GCM AAD，绑定密文位置，防跨资源/乱序移花接木。
+- **token 存储**：设备密钥（首次随机、0600）AES-256-GCM 加密 `secrets.enc`（`FileSecretStore`）；OS 钥匙串后端可实现同接口后替换。
 
 ## 6. 性能与安全要求
 
