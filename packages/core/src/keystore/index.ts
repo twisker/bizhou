@@ -10,8 +10,8 @@
  * 主密码派生的 vault MK；token 本身即便泄露也只是访问用户自己的网盘。
  */
 
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { openFromBase64, sealToBase64 } from "../crypto/index.ts";
 
 export interface SecretStore {

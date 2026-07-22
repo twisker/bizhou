@@ -6,9 +6,16 @@
   "bin": {
     "bz": "./src/index.ts"
   },
-  "files": ["src", "dist"],
+  "files": ["dist"],
   "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "tsup",
     "test": "bun test"
+  },
+  "publishConfig": {
+    "bin": {
+      "bz": "./dist/index.js"
+    }
   },
   "dependencies": {
     "@bizhou/core": "workspace:*"

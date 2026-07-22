@@ -4,23 +4,23 @@
  * 核心库保持纯净。
  */
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AccountManager,
-  type BundleStore,
   BaiduBundleStore,
   BaiduClient,
-  configPaths,
+  type BundleStore,
   type ConfigPaths,
-  type HttpClient,
-  type OAuthConfig,
+  configPaths,
   FileSecretStore,
+  type HttpClient,
   LocalBundleStore,
+  type OAuthConfig,
   unlockWithPassword,
-  type VaultFile,
   VaultError,
+  type VaultFile,
 } from "@bizhou/core";
 import { resolveMasterPassword } from "./prompt.ts";
 
@@ -34,10 +34,7 @@ export function parseDotenv(text: string): Record<string, string> {
     if (eq < 0) continue;
     const key = line.slice(0, eq).trim();
     let val = line.slice(eq + 1).trim();
-    if (
-      (val.startsWith("'") && val.endsWith("'")) ||
-      (val.startsWith('"') && val.endsWith('"'))
-    ) {
+    if ((val.startsWith("'") && val.endsWith("'")) || (val.startsWith('"') && val.endsWith('"'))) {
       val = val.slice(1, -1);
     }
     out[key] = val;

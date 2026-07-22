@@ -15,6 +15,7 @@
  * 没有主密码或恢复密钥，任何人都解不开 MK → 解不开任何 DEK → 读不到内容。真端到端。
  */
 
+import { base32Decode, base32Encode, groupBase32 } from "../crypto/base32.ts";
 import {
   DEFAULT_SCRYPT,
   deriveKey,
@@ -27,7 +28,6 @@ import {
   unwrapKey,
   wrapKey,
 } from "../crypto/index.ts";
-import { base32Decode, base32Encode, groupBase32 } from "../crypto/base32.ts";
 import { AuthError, VaultError } from "../errors.ts";
 
 /** 用于校验解锁得到的 MK 是否正确的固定标记。 */
@@ -105,7 +105,10 @@ export async function createVault(
 }
 
 /** 用主密码解锁，返回 MK。密码错误因 GCM tag 失败抛 AuthError。 */
-export async function unlockWithPassword(vault: VaultFile, masterPassword: string): Promise<Buffer> {
+export async function unlockWithPassword(
+  vault: VaultFile,
+  masterPassword: string,
+): Promise<Buffer> {
   const pwSalt = Buffer.from(vault.pwSalt, "base64");
   const kekPw = await deriveKey(masterPassword, pwSalt, vault.kdf);
   let mk: Buffer;

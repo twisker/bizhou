@@ -155,7 +155,9 @@ function validateChunk(raw: unknown, index: number): ChunkInfo {
     sha256: req(c, "sha256", "string") as string,
   };
   if (chunk.seq !== index) {
-    throw new ManifestError(`manifest.chunks[${index}] 的 seq=${chunk.seq} 与位置不符（应连续从 0）`);
+    throw new ManifestError(
+      `manifest.chunks[${index}] 的 seq=${chunk.seq} 与位置不符（应连续从 0）`,
+    );
   }
   return chunk;
 }

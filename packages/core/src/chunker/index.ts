@@ -10,10 +10,10 @@
 import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { type ChunkInfo, chunkAad, chunkFileName, type Compression } from "../bundle/index.ts";
+import { type ChunkInfo, type Compression, chunkAad, chunkFileName } from "../bundle/index.ts";
 import { aeadDecrypt, aeadEncrypt } from "../crypto/index.ts";
-import type { ProgressCallback } from "../events/index.ts";
 import { BizhouError } from "../errors.ts";
+import type { ProgressCallback } from "../events/index.ts";
 import type { BundleStore } from "../store/index.ts";
 
 function sha256hex(b: Buffer): string {
@@ -65,7 +65,13 @@ export async function encryptFileToChunks(opts: EncryptFileOptions): Promise<Chu
       });
       bytesDone += bytesRead;
       position += bytesRead;
-      opts.onProgress?.({ phase: "encrypt", seq, totalChunks, bytesDone, bytesTotal: opts.fileSize });
+      opts.onProgress?.({
+        phase: "encrypt",
+        seq,
+        totalChunks,
+        bytesDone,
+        bytesTotal: opts.fileSize,
+      });
       seq++;
       if (bytesRead < opts.chunkSize) break; // 最后一片（不足整片）
     }

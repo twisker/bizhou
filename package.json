@@ -8,11 +8,15 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/cli/tsconfig.json --noEmit",
-    "lint": "echo 'lint: TODO(Sprint0) 配置 ESLint/Biome'"
+    "build": "pnpm --filter @bizhou/core build && pnpm --filter @bizhou/cli build",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write ."
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.5",
     "@types/bun": "latest",
     "@types/node": "^22",
+    "tsup": "^8.5.1",
     "typescript": "^5.6.0"
   },
   "license": "Apache-2.0"

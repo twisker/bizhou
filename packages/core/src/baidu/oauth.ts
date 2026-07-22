@@ -19,7 +19,12 @@ export type FetchLike = (
     headers?: Record<string, string>;
     body?: string;
   },
-) => Promise<{ ok: boolean; status: number; json: () => Promise<unknown>; text: () => Promise<string> }>;
+) => Promise<{
+  ok: boolean;
+  status: number;
+  json: () => Promise<unknown>;
+  text: () => Promise<string>;
+}>;
 
 export interface OAuthConfig {
   readonly appKey: string; // client_id

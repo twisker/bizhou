@@ -6,15 +6,15 @@
  * （BaiduBundleStore，联网）实现同一接口，pipeline 一字不改即可切换。
  */
 
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { BizhouError } from "../errors.ts";
 import {
   bundleDirName,
   chunkFileName,
   MANIFEST_FILENAME,
   PREVIEW_FILENAME,
 } from "../bundle/index.ts";
+import { BizhouError } from "../errors.ts";
 
 export interface BundleStore {
   readonly bundleId: string;

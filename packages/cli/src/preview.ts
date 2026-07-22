@@ -32,9 +32,7 @@ function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     const p = spawn(ffmpegBin(), ["-y", "-loglevel", "error", ...args], { stdio: "ignore" });
     p.on("error", reject);
-    p.on("close", (code) =>
-      code === 0 ? resolve() : reject(new Error(`ffmpeg 退出码 ${code}`)),
-    );
+    p.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg 退出码 ${code}`))));
   });
 }
 

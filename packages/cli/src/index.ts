@@ -1,12 +1,14 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
+
 /**
  * bz —— 敝帚命令行入口。解析参数、分发命令、把 BizhouError 映射为规范退出码。
+ * 开发期用 `bun packages/cli/src/index.ts`（bun 直接跑 TS）；发布产物 dist/index.js 走 node。
  */
 
-import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
 import { BizhouError } from "@bizhou/core";
 import {
   cmdAccount,

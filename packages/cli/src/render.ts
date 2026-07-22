@@ -21,20 +21,20 @@ export const c = {
 };
 
 export function info(msg: string): void {
-  process.stderr.write(msg + "\n");
+  process.stderr.write(`${msg}\n`);
 }
 export function ok(msg: string): void {
-  process.stderr.write(c.green("✓ ") + msg + "\n");
+  process.stderr.write(`${c.green("✓ ") + msg}\n`);
 }
 export function warn(msg: string): void {
-  process.stderr.write(c.yellow("⚠ ") + msg + "\n");
+  process.stderr.write(`${c.yellow("⚠ ") + msg}\n`);
 }
 export function errorLine(msg: string): void {
-  process.stderr.write(c.red("✗ ") + msg + "\n");
+  process.stderr.write(`${c.red("✗ ") + msg}\n`);
 }
 /** 面向脚本消费的正式输出走 stdout。 */
 export function out(msg: string): void {
-  process.stdout.write(msg + "\n");
+  process.stdout.write(`${msg}\n`);
 }
 
 export function formatBytes(n: number): string {

@@ -35,11 +35,17 @@ jobs:
       - name: Install deps
         run: pnpm install --frozen-lockfile
 
+      - name: Lint (biome)
+        run: pnpm run lint
+
       - name: Typecheck
         run: pnpm run typecheck
 
       - name: Test (bun) —— 不触真实网盘
         run: bun test
+
+      - name: Build（core + 自包含 CLI）
+        run: pnpm run build
 
   # 注：涉及真实百度接口的往返冒烟（M0 验证、QPS 实测）由人工用测试账号执行，
   # 不放入自动 CI（需 OAuth 授权 + 真实配额）。见 .claude/arch-spec-registry.md。

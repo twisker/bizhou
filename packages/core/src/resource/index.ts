@@ -10,11 +10,11 @@ import { basename } from "node:path";
 import {
   type Compression,
   type Manifest,
+  openMeta,
   PREVIEW_FILENAME,
   type PreviewKind,
-  type ResourceMeta,
-  openMeta,
   parseManifest,
+  type ResourceMeta,
   sealMeta,
   serializeManifest,
 } from "../bundle/index.ts";

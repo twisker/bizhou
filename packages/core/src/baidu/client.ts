@@ -66,7 +66,7 @@ function form(params: Record<string, string>): string {
 
 export class BaiduClient {
   constructor(
-    private readonly config: OAuthConfig,
+    readonly _config: OAuthConfig,
     private accessToken: string,
     private readonly http: HttpClient,
   ) {}
@@ -96,14 +96,18 @@ export class BaiduClient {
 
   /** 预创建，拿 uploadid 与需上传的分片列表。 */
   async precreate(path: string, size: number, blockMd5: string[]): Promise<PrecreateResult> {
-    const data = await this.fileApi("precreate", {}, form({
-      path,
-      size: String(size),
-      isdir: "0",
-      autoinit: "1",
-      rtype: "3",
-      block_list: JSON.stringify(blockMd5),
-    }));
+    const data = await this.fileApi(
+      "precreate",
+      {},
+      form({
+        path,
+        size: String(size),
+        isdir: "0",
+        autoinit: "1",
+        rtype: "3",
+        block_list: JSON.stringify(blockMd5),
+      }),
+    );
     if (typeof data.uploadid !== "string") {
       throw new BizhouError("BAIDU", "precreate 未返回 uploadid");
     }
@@ -145,14 +149,18 @@ export class BaiduClient {
     uploadid: string,
     blockMd5: string[],
   ): Promise<{ fsId?: number }> {
-    const data = await this.fileApi("create", {}, form({
-      path,
-      size: String(size),
-      isdir: "0",
-      uploadid,
-      rtype: "3",
-      block_list: JSON.stringify(blockMd5),
-    }));
+    const data = await this.fileApi(
+      "create",
+      {},
+      form({
+        path,
+        size: String(size),
+        isdir: "0",
+        uploadid,
+        rtype: "3",
+        block_list: JSON.stringify(blockMd5),
+      }),
+    );
     return { fsId: typeof data.fs_id === "number" ? data.fs_id : undefined };
   }
 

@@ -8,9 +8,21 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "files": ["src", "dist"],
+  "files": ["dist"],
   "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "tsup",
     "test": "bun test"
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
   },
   "license": "Apache-2.0",
   "engines": {

@@ -2,8 +2,8 @@
  * bz 各命令实现。命令只做"编排 + 交互 + 渲染"，加密/分片/对接全在 @bizhou/core。
  */
 
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
-import { mkdir, mkdtemp, rm, stat, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
@@ -11,7 +11,6 @@ import {
   BizhouError,
   base32Decode,
   base32Encode,
-  BaiduBundleStore,
   buildAuthorizeUrl,
   changePassword,
   createVault,
@@ -36,13 +35,8 @@ import {
 import { findSevenZip, sevenZipArchive } from "./export7z.ts";
 import { generatePreview } from "./preview.ts";
 import { readLineFromStdin, readPassword, resolveMasterPassword } from "./prompt.ts";
-import {
-  baiduClientForCurrent,
-  createRuntime,
-  makeStore,
-  type Runtime,
-} from "./runtime.ts";
 import { c, endProgress, formatBytes, info, ok, out, renderProgress, warn } from "./render.ts";
+import { baiduClientForCurrent, createRuntime, makeStore, type Runtime } from "./runtime.ts";
 
 export interface CommonOpts {
   local?: string;
@@ -72,7 +66,10 @@ const SHARE_PREFIX = "BZK1-";
 
 export async function cmdInit(rt: Runtime, opts: CommonOpts & { force?: boolean }): Promise<void> {
   if (rt.vaultExists() && !opts.force) {
-    throw new BizhouError("VAULT", "已初始化（vault 已存在）。如需重置请加 --force（会使旧数据不可解！）");
+    throw new BizhouError(
+      "VAULT",
+      "已初始化（vault 已存在）。如需重置请加 --force（会使旧数据不可解！）",
+    );
   }
   const interactive =
     process.stdin.isTTY && !opts.passwordStdin && process.env.BIZHOU_MASTER_PASSWORD === undefined;
@@ -84,7 +81,7 @@ export async function cmdInit(rt: Runtime, opts: CommonOpts & { force?: boolean 
   }
   const { vault, recoveryKey } = await createVault(pw, { createdAt: new Date().toISOString() });
   await rt.saveVault(vault);
-  ok("已初始化 vault：" + rt.paths.vault);
+  ok(`已初始化 vault：${rt.paths.vault}`);
   info("");
   warn("以下是你的恢复密钥，只显示这一次，请离线妥善保管（忘记主密码时用它恢复）：");
   out(c.bold(recoveryKey));
@@ -92,10 +89,7 @@ export async function cmdInit(rt: Runtime, opts: CommonOpts & { force?: boolean 
   warn("任何人拿到恢复密钥即可解开你的数据 —— 切勿上传、截图或存入云端。");
 }
 
-export async function cmdUnlock(
-  rt: Runtime,
-  opts: CommonOpts & { ttl?: number },
-): Promise<void> {
+export async function cmdUnlock(rt: Runtime, opts: CommonOpts & { ttl?: number }): Promise<void> {
   const vault = await rt.loadVault();
   const pw = await resolveMasterPassword("主密码: ", opts);
   const mk = await unlockWithPassword(vault, pw);
@@ -213,7 +207,11 @@ export async function cmdLogout(rt: Runtime): Promise<void> {
   ok(`账号「${cur.name}」已注销。`);
 }
 
-export async function cmdAccount(rt: Runtime, sub: string | undefined, arg?: string): Promise<void> {
+export async function cmdAccount(
+  rt: Runtime,
+  sub: string | undefined,
+  arg?: string,
+): Promise<void> {
   if (!sub || sub === "list") {
     const { names, current } = await rt.accounts.listAccounts();
     if (names.length === 0) {
