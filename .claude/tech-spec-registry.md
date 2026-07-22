@@ -1,0 +1,85 @@
+# 技术规格登记表
+
+本文件记载 **敝帚（Bìzhǒu）** 各模块使用的技术栈、算法规范和技术规格。
+
+---
+
+## 1. 技术栈
+
+| 层级 | 技术选型 | 说明 |
+|------|---------|------|
+| 语言 | TypeScript（strict） | 单语言、生态成熟、类型安全 |
+| 运行时（主） | **Bun** | 内置 `crypto`（AES-256-GCM + scrypt）、启动快；作为主目标运行时 |
+| 运行时（兼容） | Node LTS | 核心库须同时兼容 Node LTS，保证可嵌入任意 Node 前端/自动化 |
+| 包管理 / 仓库 | **pnpm workspaces（monorepo）** | `packages/core` + `packages/cli` 两个独立发布单元 |
+| 测试 | **`bun test`** | 单元 + 集成测试；集成测试覆盖百度接口（可用 mock / 录制回放） |
+| 大文件加密 | `worker_threads` | 分片加密并行、避免阻塞主线程 |
+| 加密算法 | AES-256-GCM（AEAD） | 机密性 + 完整性/防篡改，用运行时内置 `crypto`，零外部二进制依赖 |
+| 密钥派生（KDF） | scrypt（首选）/ argon2id | 由用户主密码派生 KEK；加盐；参数记入 manifest |
+| 压缩（可选） | gzip（内置）/ zstd（可选） | 先压缩再加密；媒体文件默认关闭 |
+| 百度对接 | 直连 REST + OAuth2 | 官方无 JS SDK；`xpan/file` + `pcs/superfile2` + download |
+| 凭证/密钥存储 | OS 钥匙串 | macOS Keychain / Windows Credential Manager / Linux Secret Service |
+| 7z 导出 | `node-7z` + `7zip-bin`（评估中） | 7z-AES + 头部加密（藏文件名）；导出后可脱离本工具解密 |
+| Lint / 格式化 | ESLint + Prettier（或 Biome） | 提交前检查；CI 强制 |
+
+> 运行时说明：以 **Bun 优先**，但 `@bizhou/core` 不得使用 Bun 专有 API，须在 Node LTS 下等价运行。CLI 层可使用 Bun 特性，但需保证 Node 下亦可用（分发要求）。
+
+---
+
+## 2. 配色体系
+
+不适用（本项目为 CLI + 库，无图形界面）。
+
+> CLI 输出的颜色/样式约定（如成功=绿、警告=黄、错误=红、进度=灰）在开发 CLI 层时于本节补充。
+
+---
+
+## 3. 布局规范
+
+不适用（无 GUI）。
+
+**CLI 交互约定（占位，开发时细化）：**
+- 退出码：`0` 成功；非 0 表示错误类别（网络/鉴权/密钥/参数）。
+- 进度：长任务（上传/下载/加密）通过核心库**进度事件**驱动 CLI 进度条。
+- 交互：主密码/口令输入走隐藏输入；绝不回显、绝不写日志。
+
+---
+
+## 4. 通用组件规范
+
+不适用（无前端组件）。核心库对外的**编程接口约定**在 `module-spec-registry.md` 中登记。
+
+---
+
+## 5. 核心 API 依赖（百度网盘开放平台）
+
+| 接口 | 用途 | 状态 |
+|------|------|------|
+| OAuth 2.0（授权码 / device-code） | 获取/刷新 access token | 待验证（M0） |
+| `xpan/file` · precreate | 预创建、拿 `uploadid` | 待验证（M0） |
+| `pcs/superfile2` | 逐 4MB 分片上传（`partseq`） | 待验证（M0） |
+| `xpan/file` · create | 合并落盘到 `/apps/bizhou/<bundle>/NNN.part` | 待验证（M0） |
+| `xpan/file` · list | 列出 `/apps/bizhou/` 下的 bundle | 待验证（M1） |
+| download（dlink / 下载接口） | 下载分片与预览包 | 待验证（M1） |
+
+**沙盒约束**：应用只能操作 `/apps/bizhou/` 单一目录。
+**单文件上限**：普通用户 4GB / SVIP 20GB → 用 100MB 逻辑分片规避。
+**凭证**：用户自备 AppKey/SecretKey，工具**不内嵌任何凭证**。
+**QPS/配额**：官方未公开，**M0 实测**后据此设并发与退避策略。
+
+---
+
+## 6. 性能与安全要求
+
+| 要求 | 说明 |
+|------|------|
+| 版本管理 | 遵循 `major.minor.patch`，patch 自动递增（git hook），major/minor 人工触发 |
+| 往返一致性 | 上传→下载→解密→合并后必须**字节级一致**（SHA-256 校验），作为核心库硬性测试 |
+| 加密完整性 | AES-256-GCM tag 校验失败即拒绝解密并报错，绝不静默返回损坏数据 |
+| 密钥隔离 | DEK/KEK/主密码/token **全程只在客户端**，不上传、不托管、不入库、不写明文日志 |
+| 端到端 | 无主密码任何人不可解；换机/重装只需重输主密码（机器无关） |
+| 恢复兜底 | `bz init` 生成恢复密钥，忘主密码时可恢复；引导用户离线保管 |
+| 大文件不阻塞 | 分片加密走 `worker_threads`；内存占用与文件大小解耦（流式处理） |
+| 断点续传 | 复用云端 `uploadid`；上传中断可续传 |
+| 零外部二进制依赖（加密） | AES/KDF 全用运行时内置 `crypto`，保证可审计、跨平台一致 |
+| 可审计 | 代码中无任何硬编码秘密；KDF 参数、算法标识写入 manifest 明文，便于审计 |

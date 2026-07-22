@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Git pre-commit hook: 自动递增 patch 版本号
+# 仅在有实际代码变更（非仅 VERSION 文件变更）时触发
+
+STAGED_FILES=$(git diff --cached --name-only)
+
+# 如果只有 VERSION 文件变更，跳过（避免无限循环）
+NON_VERSION_FILES=$(echo "$STAGED_FILES" | grep -v "^VERSION$" || true)
+if [ -z "$NON_VERSION_FILES" ]; then
+  exit 0
+fi
+
+# 递增 patch 版本
+SCRIPT_DIR="$(git rev-parse --show-toplevel)/scripts"
+if [ -f "$SCRIPT_DIR/bump-patch.sh" ]; then
+  bash "$SCRIPT_DIR/bump-patch.sh"
+fi
