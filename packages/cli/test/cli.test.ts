@@ -1,0 +1,110 @@
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { unwrapDek } from "@bizhou/core";
+import {
+  cmdInfo,
+  cmdInit,
+  cmdLs,
+  cmdPull,
+  cmdPush,
+  cmdRm,
+  cmdShare,
+  createRuntime,
+  parseSize,
+  parseShareCode,
+} from "../src/commands.ts";
+
+let work: string;
+let localStore: string;
+
+beforeAll(async () => {
+  work = await mkdtemp(join(tmpdir(), "bizhou-cli-"));
+  localStore = join(work, "store");
+  process.env.BIZHOU_CONFIG_DIR = join(work, "cfg");
+  process.env.BIZHOU_MASTER_PASSWORD = "cli-test-pass";
+});
+afterAll(async () => {
+  await rm(work, { recursive: true, force: true });
+  delete process.env.BIZHOU_CONFIG_DIR;
+  delete process.env.BIZHOU_MASTER_PASSWORD;
+});
+
+function sha256(b: Buffer): string {
+  return createHash("sha256").update(b).digest("hex");
+}
+
+describe("parseSize", () => {
+  test("单位解析", () => {
+    expect(parseSize("1024")).toBe(1024);
+    expect(parseSize("4MB")).toBe(4 * 1024 ** 2);
+    expect(parseSize("100mb")).toBe(100 * 1024 ** 2);
+    expect(parseSize("2G")).toBe(2 * 1024 ** 3);
+    expect(parseSize("1.5kb")).toBe(1536);
+  });
+  test("非法输入抛错", () => {
+    expect(() => parseSize("abc")).toThrow();
+  });
+});
+
+describe("CLI 命令（离线 --local，真实命令代码）", () => {
+  test("init → push → ls/info → pull 字节级一致 → rm", async () => {
+    const rt = createRuntime();
+    await cmdInit(rt, {});
+
+    const data = randomBytes(2_500_000); // 多片
+    const inPath = join(work, "secret.bin");
+    await writeFile(inPath, data);
+
+    const id = await cmdPush(rt, inPath, {
+      local: localStore,
+      chunk: "1MB",
+      name: "私密.bin",
+    });
+    expect(id).toMatch(/^[0-9a-f]{32}$/);
+
+    // ls / info 不抛错
+    await cmdLs(rt, { local: localStore });
+    await cmdInfo(rt, id, { local: localStore });
+
+    const outDir = join(work, "out");
+    await cmdPull(rt, id, { local: localStore, out: outDir });
+    const restored = await readFile(join(outDir, "私密.bin"));
+    expect(sha256(restored)).toBe(sha256(data)); // 字节级一致
+
+    await cmdRm(rt, id, { local: localStore });
+  });
+
+  test("share --code 导出的 DEK 能解开该资源 manifest 的 wrappedKey", async () => {
+    const rt = createRuntime();
+    const inPath = join(work, "share.bin");
+    const data = randomBytes(4096);
+    await writeFile(inPath, data);
+    const id = await cmdPush(rt, inPath, { local: localStore, name: "share.bin" });
+
+    // 捕获 share --code 打印的分享码
+    const printed: string[] = [];
+    const origWrite = process.stdout.write.bind(process.stdout);
+    (process.stdout.write as unknown as (s: string) => boolean) = (s: string) => {
+      printed.push(String(s));
+      return true;
+    };
+    try {
+      await cmdShare(rt, id, { local: localStore, code: true });
+    } finally {
+      process.stdout.write = origWrite;
+    }
+    const shareCode = printed.join("").split("\n").find((l) => l.includes("BZK1-"))!.trim();
+    const dek = parseShareCode(shareCode.replace(/\x1b\[[0-9;]*m/g, "")); // 去除 ANSI
+
+    // 用 share 出来的 DEK 直接解 manifest 的 wrappedKey 应等于同一 DEK
+    const manifestJson = await readFile(join(localStore, `${id}.bz`, "manifest.json"), "utf8");
+    const wrappedKey = JSON.parse(manifestJson).wrappedKey as string;
+    // 用 rt 的 MK 解出 DEK，应与分享码一致
+    const mk = await rt.resolveMk({});
+    const dekViaMk = unwrapDek(mk, wrappedKey);
+    expect(dek.equals(dekViaMk)).toBe(true);
+  });
+});

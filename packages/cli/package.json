@@ -1,0 +1,20 @@
+{
+  "name": "@bizhou/cli",
+  "version": "0.1.0",
+  "description": "敝帚 CLI（bz）：核心库的命令行包装，可测、可脚本化、可作为 agent Skill。",
+  "type": "module",
+  "bin": {
+    "bz": "./src/index.ts"
+  },
+  "files": ["src", "dist"],
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@bizhou/core": "workspace:*"
+  },
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  }
+}

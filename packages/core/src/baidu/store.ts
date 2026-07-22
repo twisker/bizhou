@@ -93,4 +93,9 @@ export class BaiduBundleStore implements BundleStore {
     }
     return seqs.sort((a, b) => a - b);
   }
+
+  async remove(): Promise<void> {
+    await this.client.deletePaths([this.dir]);
+    this.fsidCache = undefined;
+  }
 }

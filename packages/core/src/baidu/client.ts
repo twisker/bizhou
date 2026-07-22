@@ -212,6 +212,15 @@ export class BaiduClient {
     }));
   }
 
+  /** 删除远端路径（文件或目录）。 */
+  async deletePaths(paths: string[]): Promise<void> {
+    await this.fileApi(
+      "filemanager",
+      { opera: "delete" },
+      form({ async: "0", filelist: JSON.stringify(paths), ondup: "fail" }),
+    );
+  }
+
   /** 通过 dlink 下载文件字节。 */
   async download(dlink: string): Promise<Buffer> {
     const sep = dlink.includes("?") ? "&" : "?";

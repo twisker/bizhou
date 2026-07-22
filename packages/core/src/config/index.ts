@@ -10,6 +10,7 @@ export interface Env {
   readonly APPDATA?: string;
   readonly XDG_CONFIG_HOME?: string;
   readonly BIZHOU_CONFIG_DIR?: string;
+  readonly [key: string]: string | undefined;
 }
 
 export type Platform = "darwin" | "win32" | "linux" | string;

@@ -6,7 +6,7 @@
  * （BaiduBundleStore，联网）实现同一接口，pipeline 一字不改即可切换。
  */
 
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { BizhouError } from "../errors.ts";
 import {
@@ -26,6 +26,8 @@ export interface BundleStore {
   getPreview(): Promise<Buffer>;
   /** 列出已存在的分片 seq（用于断点续传判断哪些已上传）。 */
   listChunks(): Promise<number[]>;
+  /** 删除整个 bundle。 */
+  remove(): Promise<void>;
 }
 
 /** 本地目录实现：baseDir/<id>.bz/ 下写 000.part / manifest.json / preview.part。 */
@@ -88,6 +90,10 @@ export class LocalBundleStore implements BundleStore {
     }
     return seqs.sort((a, b) => a - b);
   }
+
+  async remove(): Promise<void> {
+    await rm(this.dir, { recursive: true, force: true });
+  }
 }
 
 /** 内存实现：主要用于测试与将来的 dry-run。 */
@@ -125,5 +131,10 @@ export class MemoryBundleStore implements BundleStore {
   }
   async listChunks(): Promise<number[]> {
     return [...this.chunks.keys()].sort((a, b) => a - b);
+  }
+  async remove(): Promise<void> {
+    this.chunks.clear();
+    this.manifest = undefined;
+    this.preview = undefined;
   }
 }
