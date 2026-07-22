@@ -36,3 +36,6 @@ coverage/
 # --- 测试产物 / 临时大文件 ---
 tmp/
 *.bz/
+
+# 发版生成物（tarball + manifest）
+packaging/generated/

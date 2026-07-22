@@ -63,7 +63,11 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
 
 凭证: 在项目 .env 配置 BAIDU_APP_KEY / BAIDU_SECRET_KEY（见 .env.example）。`;
 
+// 构建期由 tsup 注入（发布产物）；开发期未定义，回退读根 VERSION 文件。
+declare const __BZ_VERSION__: string | undefined;
+
 function version(): string {
+  if (typeof __BZ_VERSION__ !== "undefined" && __BZ_VERSION__) return __BZ_VERSION__;
   try {
     const here = dirname(fileURLToPath(import.meta.url));
     // packages/cli/src → repo 根的 VERSION
