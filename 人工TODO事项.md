@@ -8,7 +8,7 @@
 
 | 编号 | 事项 | 关联 Sprint | 优先级 | 状态 |
 |------|------|------------|--------|------|
-| H-01 | 申请百度网盘**开放平台应用凭证**（AppKey/SecretKey），确认可操作 `/apps/bizhou/` 沙盒目录。个人应用创建可能受限，需提前确认。 | Sprint 0 (M0) | P0 | 待开始 |
+| H-01 | 申请百度网盘**开放平台应用凭证**（AppKey/SecretKey）。凭证已获取并存入本地 `.env`（AppID/AppKey/SecretKey/SignKey）。沙盒 `/apps/bizhou/` 可操作性并入 M0 spike 验证（见 H-02）。 | Sprint 0 (M0) | P0 | ✅ 已完成 |
 | H-02 | 用一个测试百度账号完成 M0 **关键验证**：上传"内容不可识别的加密大文件"，确认云端不因此限制/封禁（全案前提）。 | Sprint 0 (M0) | P0 | 待开始 |
 | H-03 | 实测并记录百度接口 **QPS / 配额 / 频率限制**，供 AI 设定并发与退避策略。 | Sprint 0 (M0) | P1 | 待开始 |
 | H-04 | 确认加密/密钥架构关键决策（KDF 选 scrypt 还是 argon2id、默认参数、恢复密钥形态）——涉及安全，需人工拍板。 | Sprint 1 | P1 | 待开始 |
@@ -23,3 +23,4 @@
 | 编号 | 事项 | 完成日期 | 备注 |
 |------|------|---------|------|
 | H-00 | 初始化 AI-Human 协作框架（README、CLAUDE.md、.claude/ 登记表、版本钩子、LICENSE） | 2026-07-23 | 由 project-bootstrap 生成 |
+| H-01 | 获取百度开放平台应用凭证并存入本地 `.env`（BAIDU_APP_ID/APP_KEY/SECRET_KEY/SIGN_KEY） | 2026-07-23 | 凭证不入库；`.env.example` 为可提交模板 |
