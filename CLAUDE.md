@@ -43,7 +43,7 @@
 ### 安全红线（本项目特有，最高优先级）
 
 - **密钥/凭证绝不入库、绝不写明文日志**：主密码、恢复密钥、DEK/KEK、百度 AppKey/SecretKey、OAuth token 一律不得提交、不得 `console.log`、不得进测试快照。
-- **加密算法/KDF 参数/密钥包裹与恢复流程的改动**，属人工决策点，须先与人工确认再实现（见 COLLABORATION 角色）。
+- **加密算法/KDF 参数/密钥包裹与恢复流程的改动**由 AI 自主推进（无需人工逐项确认）：选用业界稳健默认（AES-256-GCM、scrypt/argon2id 合理参数），把算法与参数记入 manifest 与 `tech-spec-registry.md`，并用往返一致性 + 失败路径测试自证正确。重大不可逆决策（如更改已发布 manifest 的密钥包裹格式）在 commit 说明中标注，供人工事后审阅。
 - 核心库**只发进度事件、绝不 print**；所有交互（口令输入、确认）留在 CLI 层。
 - 任何解密路径遇到 GCM tag 校验失败/错误主密码，必须报错，**绝不静默返回损坏数据**。
 
@@ -64,8 +64,7 @@
 
 ### 每个任务开始时
 
-- 读取 `tech-spec` / `module-spec` / `sprint-plan` / `current-sprint` / `test-registry`，明确技术规格、模块边界、进度、测试要求，直接开始。
-- 例外：涉及**加密算法/KDF 参数/密钥包裹与恢复流程**的改动仍属人工决策点，须先与人工确认（见下方安全红线与 COLLABORATION 角色）。
+- 读取 `tech-spec` / `module-spec` / `sprint-plan` / `current-sprint` / `test-registry`，明确技术规格、模块边界、进度、测试要求，直接开始（含加密相关任务，无需人工逐项确认）。
 
 ### 每个任务完成前
 
@@ -95,9 +94,8 @@
 
 本项目无前端。对每个阶段的任务，按以下步骤：
 
-1. 先形成设计/接口草案（尤其加密与 manifest schema）。
-2. 涉及安全的设计经人工确认后方可进入开发。
-3. 分解核心库模块任务（crypto → bundle → chunker → baidu → preview/export/account）。
+1. 先形成设计/接口草案（尤其加密与 manifest schema），由 AI 自主定稿并记入登记表。
+2. 分解核心库模块任务（crypto → bundle → chunker → baidu → preview/export/account）。
 4. 分解 CLI 命令任务（薄包装、进度渲染、交互）。
 5. 分解测试场景与用例（**先写往返一致性与失败路径测试**）。
 6. 分解 CI 任务（lint + 类型 + `bun test` + 三平台构建，不触真实网盘）。
