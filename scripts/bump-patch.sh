@@ -8,11 +8,16 @@ if [ ! -f "$VERSION_FILE" ]; then
 fi
 
 VERSION=$(cat "$VERSION_FILE")
+# 校验版本格式，防止 VERSION 文件内容注入到算术展开 $(( )) 中
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Invalid VERSION format: '$VERSION' (expected major.minor.patch)" >&2
+  exit 1
+fi
 MAJOR=$(echo "$VERSION" | cut -d. -f1)
 MINOR=$(echo "$VERSION" | cut -d. -f2)
 PATCH=$(echo "$VERSION" | cut -d. -f3)
 
-NEW_PATCH=$((PATCH + 1))
+NEW_PATCH=$((10#$PATCH + 1))
 NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
 
 echo "$NEW_VERSION" > "$VERSION_FILE"
