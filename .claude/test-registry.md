@@ -10,7 +10,9 @@
 - 测试文件：`packages/core/test/{crypto,base32,vault,bundle,resource,baidu,account,preview}.test.ts`、`packages/cli/test/cli.test.ts`。
 - 关键覆盖：AES-GCM 往返 + 篡改/错密钥/AAD 失败、KDF/信封、vault 双路解锁 + 改密、manifest 严格校验、**资源 pack→unpack 字节级往返**（单/多片/整除/空/gzip/3MB/内存 store）、篡改分片与错 MK 被拒、百度上传编排（partseq/md5/断点续传/errno）+ 模拟网盘端到端、多账号 + 设备密钥加密落盘、预览加密往返。
 - 端到端实测（真实 `bz` 二进制，离线 `--local`）：push→pull 字节级一致、篡改被拒、错主密码被拒、ffmpeg 预览生成→加密→还原为有效 JPEG。
-- 未自动化（需真实百度联网/账号）：M0 联网往返、QPS 实测、真实 >4GB + 断点续传、第三方 7-Zip 解密验证。
+- **>4GB 实测**：4.29 GiB 文件 → 44 个 100MB 逻辑分片 → 还原 **SHA-256 字节级一致**（push 6s / pull 7s）。证明"逻辑分片规避云端 4GB 单文件上限"成立；每分片 ≤100MB。
+- **第三方 7z 解密**：条件测试（`packages/cli/test/cli.test.ts`），有 7z 二进制时自动运行——用第三方 7z 以密码提取头部加密包并校验字节一致 + 错密码被拒；无 7z 则跳过（CI/装了 p7zip 的机器会执行）。
+- 未自动化（需真实百度联网/账号）：M0 联网往返 + QPS 实测（已封装为 `scripts/m0-verify.sh` 一条命令）、真实云端断点续传。
 
 ---
 

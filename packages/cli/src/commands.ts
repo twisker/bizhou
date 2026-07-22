@@ -410,7 +410,7 @@ async function cmdShare7z(
     await unpackResource({ mk, store, outPath: restored });
     const outArchive = join(opts.out ?? ".", `${meta.name}.7z`);
     await mkdir(dirname(outArchive), { recursive: true });
-    const pw = await readPassword("为 7z 包设置密码: ");
+    const pw = process.env.BIZHOU_SHARE_PASSWORD ?? (await readPassword("为 7z 包设置密码: "));
     if (!pw) throw new BizhouError("INVALID_ARG", "7z 密码不能为空");
     await sevenZipArchive(bin, outArchive, [restored], pw);
     ok(`已导出头部加密 7z：${outArchive}（对方用 7-Zip/Keka/p7zip + 密码解开）`);

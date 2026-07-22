@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unwrapDek } from "@bizhou/core";
@@ -16,6 +17,7 @@ import {
   parseSize,
   parseShareCode,
 } from "../src/commands.ts";
+import { findSevenZip } from "../src/export7z.ts";
 
 let work: string;
 let localStore: string;
@@ -106,5 +108,40 @@ describe("CLI 命令（离线 --local，真实命令代码）", () => {
     const mk = await rt.resolveMk({});
     const dekViaMk = unwrapDek(mk, wrappedKey);
     expect(dek.equals(dekViaMk)).toBe(true);
+  });
+
+  test("share --7z 导出的包能被第三方 7z 用密码解密（有 7z 时运行）", async () => {
+    const bin = await findSevenZip();
+    if (!bin) {
+      console.log("  ↷ 跳过：本机未安装 7z（安装 p7zip 后此测试验证第三方解密）");
+      return;
+    }
+    const rt = createRuntime();
+    const inPath = join(work, "doc.bin");
+    const data = randomBytes(20_000);
+    await writeFile(inPath, data);
+    const id = await cmdPush(rt, inPath, { local: localStore, name: "机密文档.bin" });
+
+    const outDir = join(work, "7z");
+    process.env.BIZHOU_SHARE_PASSWORD = "share-pw-123";
+    try {
+      await cmdShare(rt, id, { local: localStore, sevenz: true, out: outDir });
+    } finally {
+      delete process.env.BIZHOU_SHARE_PASSWORD;
+    }
+    const archive = join(outDir, "机密文档.bin.7z");
+
+    // 用第三方 7z 解密提取，校验字节一致
+    const extractDir = join(work, "7z-extract");
+    const r = spawnSync(bin, ["x", "-p" + "share-pw-123", "-o" + extractDir, "-y", "--", archive], {
+      stdio: "ignore",
+    });
+    expect(r.status).toBe(0);
+    const extracted = await readFile(join(extractDir, "机密文档.bin"));
+    expect(sha256(extracted)).toBe(sha256(data));
+
+    // 头部加密：错误密码应无法列出/解出
+    const bad = spawnSync(bin, ["t", "-p" + "wrong-pw", "--", archive], { stdio: "ignore" });
+    expect(bad.status).not.toBe(0);
   });
 });
