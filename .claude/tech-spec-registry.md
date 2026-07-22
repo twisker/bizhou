@@ -64,6 +64,15 @@
 | `xpan/file` · filemanager(delete) | 删除资源 | 已实现，联网待验 |
 | download（dlink） | 下载分片与预览包 | 已实现，联网待验 |
 
+### 真实端点接线验证（2026-07-23，未授权探测，不发 secret）
+
+对生产端点做过一次**接线正确性**验证（不含用户授权，不完成 M0）：
+
+- **OAuth 设备码初始化**：用真实 appKey 调 `openapi.baidu.com/oauth/2.0/device/code` **成功**，返回真实 user_code + 验证 URL + 二维码 → 证明 appKey 有效、OAuth 请求格式正确、端点可达。仅差用户在浏览器输入 user_code 授权。
+- **文件 API 探测**：用非法 token 调 `pan.baidu.com/.../file?method=list&dir=/apps/bizhou` 返回结构化 `{"errno":-6}`（鉴权失败）→ 证明 URL/method/参数正确、客户端 errno 处理路径正确。
+- **可达性**：`openapi.baidu.com` ✓、`pan.baidu.com`（下载/list）✓、**`d.pcs.baidu.com`（superfile2 上传）从当前环境不可达（超时）**。→ **运行 `bz` 的机器必须能访问 `d.pcs.baidu.com` 才能上传**；M0 联网往返须在具备该出网的机器上跑（`scripts/m0-verify.sh` 已加预检）。
+- 结论：整条集成链路在真实端点上验证到「人工授权墙」之前均正确；剩余仅为用户浏览器授权 + 在可访问 d.pcs 的机器上跑一次往返。自动化形态见 `packages/core/test/baidu.live.test.ts`（`BIZHOU_LIVE=1 BAIDU_ACCESS_TOKEN=… bun test`）。
+
 **沙盒约束**：应用只能操作 `/apps/bizhou/` 单一目录。
 **单文件上限**：普通用户 4GB / SVIP 20GB → 用 100MB 逻辑分片规避。
 **凭证**：用户自备 AppKey/SecretKey，工具**不内嵌任何凭证**。

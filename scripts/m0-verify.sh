@@ -27,6 +27,15 @@ bz() { bun "$IDX" "$@"; }
 
 echo "== M0 验证：$SIZE_MB MB 文件，真实百度网盘往返 =="
 
+echo "[0/5] 预检网络可达性（上传需 d.pcs.baidu.com）"
+for h in openapi.baidu.com pan.baidu.com d.pcs.baidu.com; do
+  if curl -sS -m 8 -o /dev/null "https://$h/" 2>/dev/null; then
+    echo "  ✓ $h 可达"
+  else
+    echo "  ✗ $h 不可达 —— 该主机不可达会导致对应环节失败（上传依赖 d.pcs.baidu.com）"
+  fi
+done
+
 # 若未初始化则初始化（生成恢复密钥）
 if ! bz --version >/dev/null 2>&1; then echo "无法运行 bz"; exit 1; fi
 bz init 2>/dev/null || true
