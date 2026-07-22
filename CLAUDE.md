@@ -59,14 +59,13 @@
 
 ### 每个 Sprint 开始时
 
-- 由人工确认是否开始此 Sprint，收到明确答复后才开发。
-- 依 `.claude/sprint-plan.md` 与当前进度更新 `.claude/current-sprint.md`。
-- 检查 `人工TODO事项.md` 中本 Sprint 相关的人工前置事项是否已完成（尤其 M0 的百度凭证 H-01）。
+- 依 `.claude/sprint-plan.md` 与当前进度更新 `.claude/current-sprint.md`，直接推进，无需停下等人工确认。
+- 检查 `人工TODO事项.md` 中本 Sprint 相关的人工前置事项是否已完成（尤其 M0 的百度凭证 H-01）；若有未完成的人工前置事项，则跳过依赖它的任务、继续可独立推进的部分。
 
 ### 每个任务开始时
 
-- 由人工确认是否开始此任务。
-- 读取 `tech-spec` / `module-spec` / `sprint-plan` / `current-sprint` / `test-registry`，明确技术规格、模块边界、进度、测试要求。
+- 读取 `tech-spec` / `module-spec` / `sprint-plan` / `current-sprint` / `test-registry`，明确技术规格、模块边界、进度、测试要求，直接开始。
+- 例外：涉及**加密算法/KDF 参数/密钥包裹与恢复流程**的改动仍属人工决策点，须先与人工确认（见下方安全红线与 COLLABORATION 角色）。
 
 ### 每个任务完成前
 
