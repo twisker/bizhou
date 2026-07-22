@@ -10,6 +10,8 @@ import { basename } from "node:path";
 import {
   type Compression,
   type Manifest,
+  PREVIEW_FILENAME,
+  type PreviewKind,
   type ResourceMeta,
   openMeta,
   parseManifest,
@@ -17,7 +19,8 @@ import {
   serializeManifest,
 } from "../bundle/index.ts";
 import { decryptChunksToFile, encryptFileToChunks } from "../chunker/index.ts";
-import { generateKey } from "../crypto/index.ts";
+import { aeadDecrypt, aeadEncrypt, generateKey } from "../crypto/index.ts";
+import { BizhouError } from "../errors.ts";
 import type { ProgressCallback } from "../events/index.ts";
 import type { BundleStore } from "../store/index.ts";
 import { unwrapDek, wrapDek } from "../vault/index.ts";
@@ -40,6 +43,8 @@ export interface PackOptions {
   readonly contentType?: string;
   readonly onProgress?: ProgressCallback;
   readonly skipExisting?: readonly number[];
+  /** 可选预览包（由 CLI/前端用 ffmpeg 等生成后传入；核心库只负责加密与存储）。 */
+  readonly preview?: { readonly kind: PreviewKind; readonly data: Buffer };
 }
 
 /** 加密整个资源并写入 store（含 manifest）。返回 manifest。 */
@@ -67,6 +72,18 @@ export async function packResource(opts: PackOptions): Promise<Manifest> {
     ...(opts.contentType ? { contentType: opts.contentType } : {}),
   };
 
+  let previewInfo: Manifest["preview"];
+  if (opts.preview) {
+    const { iv, ciphertext, tag } = aeadEncrypt(dek, opts.preview.data);
+    await opts.store.putPreview(ciphertext);
+    previewInfo = {
+      file: PREVIEW_FILENAME,
+      kind: opts.preview.kind,
+      iv: iv.toString("base64"),
+      tag: tag.toString("base64"),
+    };
+  }
+
   const manifest: Manifest = {
     version: 1,
     bundleId: opts.bundleId,
@@ -76,10 +93,31 @@ export async function packResource(opts: PackOptions): Promise<Manifest> {
     chunkSize,
     wrappedKey: wrapDek(opts.mk, dek),
     chunks,
+    ...(previewInfo ? { preview: previewInfo } : {}),
     encMeta: sealMeta(dek, meta),
   };
   await opts.store.putManifest(serializeManifest(manifest));
   return manifest;
+}
+
+/** 下载并解密预览包。资源无预览时抛错。 */
+export async function openPreview(
+  mk: Buffer,
+  store: BundleStore,
+): Promise<{ kind: PreviewKind; data: Buffer }> {
+  const manifest = parseManifest(await store.getManifest());
+  if (!manifest.preview) {
+    throw new BizhouError("BUNDLE", "该资源没有预览包");
+  }
+  const dek = unwrapDek(mk, manifest.wrappedKey);
+  const ct = await store.getPreview();
+  const data = aeadDecrypt(
+    dek,
+    Buffer.from(manifest.preview.iv, "base64"),
+    ct,
+    Buffer.from(manifest.preview.tag, "base64"),
+  );
+  return { kind: manifest.preview.kind, data };
 }
 
 export interface UnpackOptions {

@@ -3,7 +3,8 @@
  */
 
 import { createServer } from "node:http";
-import { mkdir, stat, readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, readdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
   APP_ROOT,
@@ -20,6 +21,7 @@ import {
   generateBundleId,
   generateSalt,
   groupBase32,
+  openPreview,
   packResource,
   parseManifest,
   pollDeviceToken,
@@ -31,6 +33,8 @@ import {
   unwrapDek,
   wrapKey,
 } from "@bizhou/core";
+import { findSevenZip, sevenZipArchive } from "./export7z.ts";
+import { generatePreview } from "./preview.ts";
 import { readLineFromStdin, readPassword, resolveMasterPassword } from "./prompt.ts";
 import {
   baiduClientForCurrent,
@@ -237,7 +241,13 @@ export async function cmdAccount(rt: Runtime, sub: string | undefined, arg?: str
 export async function cmdPush(
   rt: Runtime,
   filePath: string,
-  opts: CommonOpts & { chunk?: string; compress?: boolean; noSplit?: boolean; name?: string },
+  opts: CommonOpts & {
+    chunk?: string;
+    compress?: boolean;
+    noSplit?: boolean;
+    name?: string;
+    preview?: boolean;
+  },
 ): Promise<string> {
   const st = await stat(filePath);
   if (!st.isFile()) throw new BizhouError("INVALID_ARG", `不是文件：${filePath}`);
@@ -249,6 +259,18 @@ export async function cmdPush(
       ? parseSize(opts.chunk)
       : DEFAULT_CHUNK_SIZE;
   const store = await makeStore(rt, bundleId, opts.local);
+
+  let preview: { kind: "video" | "audio" | "image"; data: Buffer } | undefined;
+  if (opts.preview) {
+    const p = await generatePreview(filePath);
+    if (p) {
+      preview = p;
+      info(`已生成预览包（${p.kind}，${formatBytes(p.data.length)}）`);
+    } else {
+      warn("未生成预览（非媒体类型或 ffmpeg 不可用），继续上传原文件。");
+    }
+  }
+
   info(`加密上传：${filePath}（${formatBytes(st.size)}）→ ${bundleId}`);
   await packResource({
     filePath,
@@ -261,6 +283,7 @@ export async function cmdPush(
     store,
     name: opts.name ?? basename(filePath),
     mtime: st.mtime.toISOString(),
+    preview,
     onProgress: (e) => renderProgress("加密", e.bytesDone, e.bytesTotal),
   });
   endProgress();
@@ -349,11 +372,10 @@ export async function cmdRm(rt: Runtime, id: string, opts: CommonOpts): Promise<
 export async function cmdShare(
   rt: Runtime,
   id: string,
-  opts: CommonOpts & { code?: boolean; sevenz?: boolean },
+  opts: CommonOpts & { code?: boolean; sevenz?: boolean; out?: string },
 ): Promise<void> {
   if (opts.sevenz) {
-    warn("本构建暂未内置 7z-AES 导出（需 node-7z/7zip-bin，规划于后续 Sprint）。");
-    throw new BizhouError("INVALID_ARG", "--7z 暂不可用");
+    return cmdShare7z(rt, id, opts);
   }
   // 默认 --code：导出该资源 DEK 作为分享码。
   const mk = await rt.resolveMk(opts);
@@ -366,9 +388,50 @@ export async function cmdShare(
   warn("分享码等同于该资源的解密钥匙，请通过安全渠道传递。");
 }
 
-export function cmdPreview(): Promise<void> {
-  warn("本构建暂未内置预览生成（需 ffmpeg 抽帧/截段，规划于后续 Sprint）。");
-  return Promise.reject(new BizhouError("INVALID_ARG", "preview 暂不可用"));
+/** 把资源本地还原后重打包为头部加密的 7z-AES 单包（对方用 7-Zip + 密码即可解）。 */
+async function cmdShare7z(
+  rt: Runtime,
+  id: string,
+  opts: CommonOpts & { out?: string },
+): Promise<void> {
+  const bin = await findSevenZip();
+  if (!bin) {
+    throw new BizhouError(
+      "INVALID_ARG",
+      "未找到 7z 可执行文件：请安装 p7zip（brew install p7zip / apt install p7zip-full）或设置 BIZHOU_7Z_BIN",
+    );
+  }
+  const mk = await rt.resolveMk(opts);
+  const store = await makeStore(rt, id, opts.local);
+  const { meta } = await readResourceMeta(mk, store);
+  const work = await mkdtemp(join(tmpdir(), "bizhou-7z-"));
+  try {
+    const restored = join(work, meta.name);
+    await unpackResource({ mk, store, outPath: restored });
+    const outArchive = join(opts.out ?? ".", `${meta.name}.7z`);
+    await mkdir(dirname(outArchive), { recursive: true });
+    const pw = await readPassword("为 7z 包设置密码: ");
+    if (!pw) throw new BizhouError("INVALID_ARG", "7z 密码不能为空");
+    await sevenZipArchive(bin, outArchive, [restored], pw);
+    ok(`已导出头部加密 7z：${outArchive}（对方用 7-Zip/Keka/p7zip + 密码解开）`);
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+}
+
+export async function cmdPreview(
+  rt: Runtime,
+  id: string,
+  opts: CommonOpts & { out?: string },
+): Promise<void> {
+  const mk = await rt.resolveMk(opts);
+  const store = await makeStore(rt, id, opts.local);
+  const { kind, data } = await openPreview(mk, store);
+  const ext = kind === "audio" ? "mp3" : "jpg";
+  const outPath = join(opts.out ?? ".", `${id.slice(0, 12)}-preview.${ext}`);
+  await mkdir(dirname(outPath), { recursive: true });
+  await writeFile(outPath, data);
+  ok(`预览（${kind}，${formatBytes(data.length)}）已保存：${outPath}`);
 }
 
 /** 解析分享码回 DEK（供将来 import 用；此处导出以便测试与复用）。 */

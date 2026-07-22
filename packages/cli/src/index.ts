@@ -45,13 +45,13 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
   account [list|use <n>|add <n>]               多账号管理
 
 资源:
-  push <path> [--chunk 100MB] [--compress] [--no-split] [--name <n>]
+  push <path> [--chunk 100MB] [--compress] [--no-split] [--name <n>] [--preview]
   pull <id> [--out <dir>]
   ls                       列出资源（显示真名，需已解锁）
   info <id>                查看资源元数据
   rm <id>                  删除资源
-  share <id> [--code|--7z] 生成分享码 / 导出 7z-AES（后者规划中）
-  preview <id>             预览（规划中）
+  share <id> [--code|--7z] 生成分享码 / 导出 7z-AES（--7z 需 7z 二进制）
+  preview <id> [--out <dir>]  下载并解密预览包（图片/视频缩略、音频片段）
 
 通用选项:
   --local <dir>            用本地目录代替百度网盘（离线测试/自建后端）
@@ -86,6 +86,7 @@ async function main(argv: string[]): Promise<number> {
       compress: { type: "boolean" },
       "no-split": { type: "boolean" },
       name: { type: "string" },
+      preview: { type: "boolean" },
       device: { type: "boolean" },
       port: { type: "string" },
       code: { type: "boolean" },
@@ -148,6 +149,7 @@ async function main(argv: string[]): Promise<number> {
         compress: Boolean(values.compress),
         noSplit: Boolean(values["no-split"]),
         name: values.name as string | undefined,
+        preview: Boolean(values.preview),
       });
       return 0;
     case "pull":
@@ -171,10 +173,12 @@ async function main(argv: string[]): Promise<number> {
         ...common,
         code: Boolean(values.code),
         sevenz: Boolean(values["7z"]),
+        out: values.out as string | undefined,
       });
       return 0;
     case "preview":
-      await cmdPreview();
+      if (!positionals[1]) throw new BizhouError("INVALID_ARG", "用法：bz preview <id>");
+      await cmdPreview(rt, positionals[1], { ...common, out: values.out as string | undefined });
       return 0;
     default:
       errorLine(`未知命令：${cmd}`);
