@@ -71,7 +71,9 @@
 - **OAuth 设备码初始化**：用真实 appKey 调 `openapi.baidu.com/oauth/2.0/device/code` **成功**，返回真实 user_code + 验证 URL + 二维码 → 证明 appKey 有效、OAuth 请求格式正确、端点可达。仅差用户在浏览器输入 user_code 授权。
 - **文件 API 探测**：用非法 token 调 `pan.baidu.com/.../file?method=list&dir=/apps/bizhou` 返回结构化 `{"errno":-6}`（鉴权失败）→ 证明 URL/method/参数正确、客户端 errno 处理路径正确。
 - **可达性**：`openapi.baidu.com` ✓、`pan.baidu.com`（下载/list）✓、**`d.pcs.baidu.com`（superfile2 上传）从当前环境不可达（超时）**。→ **运行 `bz` 的机器必须能访问 `d.pcs.baidu.com` 才能上传**；M0 联网往返须在具备该出网的机器上跑（`scripts/m0-verify.sh` 已加预检）。
-- 结论：整条集成链路在真实端点上验证到「人工授权墙」之前均正确；剩余仅为用户浏览器授权 + 在可访问 d.pcs 的机器上跑一次往返。自动化形态见 `packages/core/test/baidu.live.test.ts`（`BIZHOU_LIVE=1 BAIDU_ACCESS_TOKEN=… bun test`）。
+- **无人工 token 的可能性已排除**：三种 OAuth 授权类型均已实测——授权码流/设备码流均需用户浏览器授权；`client_credentials`（app 级、无用户）请求 netdisk scope 返回 `invalid_scope`。原因：xpan/netdisk API 操作的是**特定用户**的 `/apps/bizhou/` 空间，必须用户级 token，app token 无用户上下文。→ **获取可用 token 只能由用户在浏览器授权，无自动化绕过路径（Baidu 安全设计）。**
+- `d.pcs.baidu.com` 从本沙盒**间歇可达**（一次 HTTP 400/2s，多次超时）——真实上传需稳定出网到该主机。
+- 结论：整条集成链路在真实端点上验证到「人工授权墙」之前均正确；剩余仅为用户浏览器授权 + 在可稳定访问 d.pcs 的机器上跑一次往返。自动化形态见 `packages/core/test/baidu.live.test.ts`（`BIZHOU_LIVE=1 BAIDU_ACCESS_TOKEN=… bun test`）。
 
 **沙盒约束**：应用只能操作 `/apps/bizhou/` 单一目录。
 **单文件上限**：普通用户 4GB / SVIP 20GB → 用 100MB 逻辑分片规避。
