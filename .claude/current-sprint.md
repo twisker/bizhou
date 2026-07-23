@@ -8,24 +8,25 @@
 
 ---
 
-## 当前状态：Sprint 间歇（v2-Phase 1 已完成并归档；v2-Phase 2 待启动）
+## 当前 Sprint：v2 云端文件系统层（Phase 2 ✅ 完成；Phase 3/4 进行中）
 
 **最后更新：** 2026-07-23
+**当前目标：** 连续完成 v2-Phase 2/3/4（目标驱动）。执行方式：每阶段 写计划 → 子代理驱动（实现+评审）→ 收尾。
 
-### 已完成里程碑
-- **M0 + M1**（客户端加密引擎 + CLI）：真机通过、功能全绿 → 归档 `.claude/archive/sprint-0-m0-m1.md`
-- **v2-Phase 1**（云端 FS 层：双本地根 + 目录树基础 + 递归 bundle 解析）：opus 整分支评审 ✅ Ready to merge → 归档 `.claude/archive/v2-phase1-cloud-fs.md`
+### 已完成里程碑（均归档于 `.claude/archive/`）
+- **M0 + M1**：真机通过、功能全绿 → `sprint-0-m0-m1.md`
+- **v2-Phase 1**：双本地根 + 目录树基础 + 递归 bundle 解析 → `v2-phase1-cloud-fs.md`
+- **v2-Phase 2**：上传/下载映射（缺省镜像 + pull 落文件根）+ `push -r`/`pull -r` 整树加密备份还原（105 测试全绿）
 
-### 代码状态
-- 分支 `feature/init_proj`（工作树干净，领先 `dev`/`main` 各约 49 提交），由人工按 git flow 合并/发版。
-- `bun test` 96 全绿 + 1 skip；typecheck / lint / build（3 产物）全过。
-
-### 下一步（待人工触发）
+### 进行中 / 待办
 | 事项 | 责任人 | 状态 |
 |------|--------|------|
-| git flow 合并 `feature/init_proj → dev`、发版（`dev→main` tag + npm/tap/bucket） | 人工 | 待办（见 `docs/release/发布准备指南.md`） |
-| 启动 **v2-Phase 2**（`push -r`/`pull -r` 整树备份还原、`pull` 落文件根映射、重名歧义） | AI（需人工示意开工） | 待启动（brainstorm → 计划 → 子代理执行） |
-| 后续 v2-Phase 3（mv/cp/rename）、v2-Phase 4（回收站） | AI | 待启动 |
+| v2-Phase 3（mv/cp/rename） | AI | 进行中 |
+| v2-Phase 4（回收站，含开放 API 联网验证） | AI | 待启动 |
+| git flow 合并 + 发版 | 人工 | 待办（`docs/release/发布准备指南.md`） |
+
+### 代码状态
+- 分支 `feature/init_proj`（工作树干净）；`bun test` 105 全绿 + 1 skip；typecheck / lint / build 全过。
 
 ### 各模块状态
 

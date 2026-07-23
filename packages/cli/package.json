@@ -1,6 +1,6 @@
 {
   "name": "@bizhou/cli",
-  "version": "0.2.23",
+  "version": "0.2.24",
   "description": "敝帚 CLI（bz）：核心库的命令行包装，可测、可脚本化、可作为 agent Skill。",
   "type": "module",
   "bin": {

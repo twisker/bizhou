@@ -116,9 +116,17 @@
 
 **验收：** `bun test` 96 全绿 + 1 skip；typecheck/lint/build(3) 全过；opus 整分支评审 ✅ Ready to merge；评审修复路径穿越（`..`/`\`）+ cmdPreview 隐患。
 
-### v2-Phase 2 — 上传/下载映射（含 `-r` 整树备份/还原）· 待启动
-> 头条功能"加密文件夹备份/还原"。独立计划待启动时细化：`push --to` 缺省云端目录计算（来源可在文件根外）、`pull` 落文件根带入结构、`push -r`/`pull -r` 整树、重名歧义。
-> **已前移完成**：**路径→bundle 递归解析**（子目录资源可按 id/前缀 pull/info/rm/share/preview）——Phase 1 收尾时应最终评审要求提前实现（commit 2fdc684）。
+### v2-Phase 2 — 上传/下载映射（含 `-r` 整树备份/还原）✅ **完成（2026-07-23）**
+> 计划：`docs/superpowers/plans/2026-07-23-cloud-fs-phase2-mapping-recursive.md`
+
+| 任务 | 说明 | 状态 |
+|-----|------|------|
+| T1 | cloudpath 映射纯函数（defaultUploadCloudDir/downloadLocalPath，含 name basename 净化） | ✅ |
+| T2 | push 缺省云端目录镜像 + pull 落文件根带入结构（含 --out 穿越修复） | ✅ |
+| T3+T4 | `push -r` / `pull -r` 递归整树加密备份/还原 | ✅ |
+| — | 路径→bundle 递归解析（已在 v2-P1 T9 前移完成） | ✅ |
+
+**验收：** `bun test` 105 全绿 + 1 skip；typecheck/lint/build 全过；每任务子代理实现+评审，修复 2 处路径穿越（--out `meta.name`、name 未净化）。
 
 ### v2-Phase 3 — 文件操作
 > `mv`、`cp`(`-r`)、`rename`（bundle=改 encMeta / 目录=native）。
