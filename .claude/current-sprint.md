@@ -56,4 +56,5 @@
 | 2026-07-23 | Sprint 0（M0+M1）完成并归档；补齐登记表状态 | `.claude/*`、`archive/sprint-0-m0-m1.md` |
 | 2026-07-23 | v2 云端 FS 层设计确认 + Phase 1 计划就绪 | `docs/superpowers/{specs,plans}/` |
 | 2026-07-23 | 统一版本脚本 bump-version.sh（VERSION+所有 package.json）；pre-commit 调用 | `scripts/`、`.githooks/` |
-| 2026-07-23 | v2-Phase 1 全部实现（config 双根/cloudpath/backend/mkdir/ls -r/push --to）+ 路径穿越修复 | `packages/core/src/{config,cloudpath,backend,baidu}`、`packages/cli/src/{runtime,commands,index}` |
+| 2026-07-23 | v2-Phase 1 全部实现（config 双根/cloudpath/backend/mkdir/ls -r/push --to）+ 路径穿越修复（`..`/`\`） | `packages/core/src/{config,cloudpath,backend,baidu}`、`packages/cli/src/{runtime,commands,index}` |
+| 2026-07-23 | 递归 bundle 解析（Phase 2 前移）：子目录资源可按 id/前缀 pull/info/rm/share/preview；补齐最终评审 Important | `packages/cli/src/{commands,runtime}` |

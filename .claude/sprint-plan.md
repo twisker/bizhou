@@ -113,7 +113,8 @@
 | T8 | 登记表同步 + 阶段收尾 | 文档 | AI | ⏳ 待开始 |
 
 ### v2-Phase 2 — 上传/下载映射（含 `-r` 整树备份/还原）
-> 头条功能"加密文件夹备份/还原"。独立计划待 Phase 1 完成后细化：`push --to` 缺省云端目录计算（来源可在文件根外）、`pull` 落文件根带入结构、`push -r`/`pull -r` 整树、路径→bundle 解析 + 重名歧义。
+> 头条功能"加密文件夹备份/还原"。独立计划待 Phase 1 完成后细化：`push --to` 缺省云端目录计算（来源可在文件根外）、`pull` 落文件根带入结构、`push -r`/`pull -r` 整树、重名歧义。
+> **已前移完成**：**路径→bundle 递归解析**（子目录资源可按 id/前缀 pull/info/rm/share/preview）——Phase 1 收尾时应最终评审要求提前实现（commit 2fdc684）。
 
 ### v2-Phase 3 — 文件操作
 > `mv`、`cp`(`-r`)、`rename`（bundle=改 encMeta / 目录=native）。
