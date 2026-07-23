@@ -184,9 +184,19 @@
 **安全红线自检通过：** contentId 仅入加密 encMeta（云端零泄露）；journal/cache 无明文密钥（journal 存 MK 包裹 DEK）；缓存键 `assertNameSegment` 防穿越、且 bundleId 不可变 → 陈旧缓存永不致错误去重；GCM 失败即抛不静默。
 **新增模块/测试：** `@bizhou/core` → `content`/`journal`/`cache`；测试 `content`/`journal`/`cache`/`upload-concurrency`/`push-idempotency`/`push-recursive-idempotency` + 内存后端夹具。
 
-### Phase 3 · S2 — 健壮下载（幂等 + 续传） 📋 **已规划，待 S1 后**
+### Phase 3 · S2 — 健壮下载（幂等 + 在飞锁 + 分片续传 + 原子落地） 📋 **计划就绪，待开跑**
 
-> 复用 S1 的 `contentId` 底座。范围：pull 前目标已存在且 hash==contentId→跳过；下载在飞锁；临时文件 + 原子改名 + **分片断点续传**；GCM 校验失败即抛不写出。spec 已含 S2 概要，待 S1 完成后单独出 plan。
+> 设计：`docs/superpowers/specs/2026-07-23-robust-upload-download-design.md`（S2 段）
+> 计划：`docs/superpowers/plans/2026-07-23-robust-download-s2.md`（含各任务完整 TDD 步骤与代码）
+> 复用 S1 的 `content`/`journal`/`cache` 底座。执行方式：子代理驱动（同 S1）。
+
+| 任务 | 说明 | 责任人 | 状态 |
+|-----|------|--------|------|
+| S2-T1 | 核心续传：`decryptChunksToFile` 支持 `skip`（定位写入 + 收尾 truncate）+ `UnpackOptions.skip` 透传；`journal` 上传专属字段（wrappedKey/chunkSize/compression）改可选（下载复用） | AI | ⬜ 待开始 |
+| S2-T2 | `cmdPull` 集成：幂等（目标 hash==contentId 跳过）→在飞锁→解密到 `.part`→**端到端 contentId 校验**→原子改名落地→`--force`；抽出共用 `pullOneBundle` | AI | ⬜ 待开始 |
+| S2-T3 | `pull -r` 递归复用 `pullOneBundle`，整树幂等/续传/锁一致 | AI | ⬜ 待开始 |
+
+**验收目标：** 下载往返字节一致；幂等跳过/在飞锁/分片续传/端到端校验各有集成测试；`bun test` 全量无回归；typecheck/lint/build 全过。**续传正确性双保险：** 逐片密文 sha256（下载即校验）+ 装配后端到端 contentId（防日志/flush 竞态跳过实际缺失片）；无 contentId 的旧 bundle 退化为仅前者。**红线：** 端到端校验不过绝不 rename 交付、绝不静默写损坏。
 
 ### Phase 3 · 其余候选（待细化）
 
