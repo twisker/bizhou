@@ -39,6 +39,7 @@ push_file() { # <repo-name> <dest-relpath> <src-file> <commit-msg>
   local name="$1" dest="$2" src="$3" msg="$4"
   local tmp
   tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN # 失败中止也清理临时目录
   git clone --depth 1 "git@github.com:$OWNER/$name.git" "$tmp" 2>/dev/null ||
     git clone --depth 1 "https://github.com/$OWNER/$name.git" "$tmp"
   mkdir -p "$tmp/$(dirname "$dest")"
