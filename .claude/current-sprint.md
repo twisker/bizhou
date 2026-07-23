@@ -8,32 +8,31 @@
 
 ---
 
-## 当前 Sprint：Phase 3 · S1 — 健壮上传 ✅ 完成（2026-07-23，待人工 git flow 合并）
+## 当前 Sprint：Phase 3 · S1 + S2 ✅ 完成（2026-07-24，待人工 git flow 合并）
 
-**最后更新：** 2026-07-23
+**最后更新：** 2026-07-24
 
-- **设计：** `docs/superpowers/specs/2026-07-23-robust-upload-download-design.md`
-- **计划：** `docs/superpowers/plans/2026-07-23-robust-upload-s1.md`（各任务完整 TDD 步骤）
-- **登记：** `.claude/sprint-plan.md` → Phase 3 · S1
+- **设计：** `docs/superpowers/specs/2026-07-23-robust-upload-download-design.md`（S1+S2）
+- **计划：** `docs/superpowers/plans/2026-07-23-robust-upload-s1.md`、`docs/superpowers/plans/2026-07-23-robust-download-s2.md`
+- **登记：** `.claude/sprint-plan.md` → Phase 3 · S1 / S2
 - **执行方式：** 子代理驱动开发（每任务 实现 + 评审），整分支评审后交人工按 git flow 合并。
 
 ### 任务状态
 | 任务 | 说明 | 状态 |
 |-----|------|------|
-| S1-T1 | contentId 底座（HKDF+HMAC，存加密 encMeta） | ✅ 已完成 |
-| S1-T2 | uploadPart 限流池并发 + fail-fast | ✅ 已完成 |
-| S1-T3 | 上传日志（锁 + 续传状态） | ✅ 已完成 |
-| S1-T4 | manifest 缓存 + 失效钩子 | ✅ 已完成 |
-| S1-T5 | cmdPush 集成（去重/锁/续传/--force/--concurrency） | ✅ 已完成（2026-07-23） |
-| S1-T6 | push -r 递归复用 pushOneFile | ✅ 已完成 |
+| S1-T1..T6 | 健壮上传（contentId 底座 / 并发池 / 上传日志 / manifest 缓存 / cmdPush 集成 / push -r） | ✅ 全部完成 |
+| S2-T1 | decryptChunksToFile 支持 skip 续传（定位写入）+ journal 上传专属字段改可选 | ✅ 已完成 |
+| S2-T2 | cmdPull 集成：幂等/在飞锁/分片续传/**端到端 contentId 校验**/原子落地/--force（抽 pullOneBundle） | ✅ 已完成 |
+| S2-T3 | pull -r 递归复用 pullOneBundle | ✅ 已完成 |
 
 ### 已完成里程碑（均归档于 `.claude/archive/`）
 - **M0 + M1**（加密引擎 + CLI）→ `sprint-0-m0-m1.md`
 - **v2 Phase 1–4 整体**（目录树 / 映射 / 整树备份 / mv-cp-rename / 回收站）→ `v2-cloud-fs.md`
 
 ### 代码状态
-- 分支 `feature/phase3`；`bun test` **155 全绿 + 1 skip**；typecheck/lint/build(3) 全过。S1 全 6 任务完成、opus 整分支评审 ✅ Ready to merge（拦下并修复 2 Critical crypto + 2 Important，见 sprint-plan S1 验收）。
-- v2 已由人工合并至 `dev`；S1 开发分支由人工按 git flow 管理。
+- 分支 `feature/phase3`；`bun test` **165 全绿 + 1 skip**；typecheck/lint/build(3) 全过。
+- S1（健壮上传）+ S2（健壮下载）全部完成，两轮 opus 整分支评审均 ✅ Ready to merge。S1 拦下并修复 2 Critical crypto（resume DEK / 确定性IV nonce 复用）+ 2 Important；S2 无新 Critical/Important，端到端 contentId 兜底续传正确性。
+- v2 已由人工合并至 `dev`；本分支由人工按 git flow 管理。
 
 ### 待人工触发（并行）
 | 事项 | 责任人 | 状态 |
@@ -41,12 +40,13 @@
 | 发版（`dev→main` tag + npm/tap/bucket，见 `docs/release/发布准备指南.md`） | 人工 | 待办 |
 | H-08 百度回收站管理接口联网验证 | 人工 | 待验证 |
 
-### 新增模块（S1 落地后登记到 module-spec-registry）
-- `@bizhou/core` → `content/`（内容身份）、`journal/`（上传日志：锁+续传）、`cache/`（manifest 缓存）。
+### 新增模块/能力（Phase 3 落地）
+- `@bizhou/core` → `content/`（内容身份 contentId）、`journal/`（上传/下载日志：在飞锁+续传状态）、`cache/`（manifest 缓存）；`decryptChunksToFile` 支持 `skip` 续传；IV 方案改确定性（tech-spec §5.1.1）。
+- CLI → `pushOneFile`/`pullOneBundle` 两个共用内核（单文件与 `-r` 递归共用）；`push`/`pull` 增 `--force`，`push` 增 `--concurrency`。
 
 ### 活跃文件清单
 
-> S1 将新建 `packages/core/src/{content,journal,cache}/index.ts` 及对应测试；改 `baidu/client.ts`、`bundle`/`resource`/`index.ts`、`cli/{commands,runtime,index}.ts`。开工前工作树干净。
+> 开工前工作树干净。Phase 3 改动集中于 `packages/core/src/{content,journal,cache,chunker,resource,crypto,bundle,baidu}`、`packages/cli/src/{commands,runtime,index}.ts` 及对应测试 + `test/helpers/memory-fixture.ts`。
 
 ### 近期重要改动记录
 
