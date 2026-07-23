@@ -7,8 +7,8 @@
 **敝帚（Bìzhǒu）** — 开源、跨平台的**客户端加密引擎 + CLI（`bz`）**：上传前本地端到端加密，云端只存密文；取回自动解密还原、字节级一致。
 
 - 项目代号：`bizhou`（CLI 命令 `bz`）
-- 版本：v0.1.0
-- 当前阶段：Sprint 0（项目初始化 + M0 技术验证）
+- 版本：见根 `VERSION`（当前 0.1.x，每次 commit 自动 bump patch）
+- 当前阶段：**M0 + M1 已完成**（M0 真机通过、M1 76 测试全绿）；进行中：**v2 云端文件系统层 · Phase 1**（见 `.claude/current-sprint.md`）
 - 技术栈：TypeScript + Bun（兼容 Node LTS）· pnpm monorepo（`@bizhou/core` + `bz`）· 授权 Apache-2.0
 
 ## 核心文档索引

@@ -8,58 +8,48 @@
 
 ---
 
-## 当前 Sprint：Sprint 0（初始化 + M0）→ Phase 1（M1）核心已完成
+## 当前 Sprint：v2 云端文件系统层 · Phase 1（双本地根 + 目录树基础）
 
 **最后更新：** 2026-07-23
-**当前目标：** 离线可验证的加密引擎 + CLI 已全部打通并测试通过；剩余为**需真实百度联网**的 M0 验证与少量增强。
+**当前目标：** 按 `docs/superpowers/plans/2026-07-23-cloud-fs-phase1-roots-and-tree.md` 实现：双本地根（密钥根 `~/.bizhou` + 文件根=下载目录）、`cloudpath` 纯函数、`Backend` 抽象（Local/Baidu）、`bz mkdir` 与 `bz ls`（含 `-r`）。
 
-### 已完成（AI 自主推进，字节级往返一致性已证）
+> **上一 Sprint（Sprint 0 / M0+M1）已完成并归档** → `.claude/archive/sprint-0-m0-m1.md`。M0 真机通过、M1 功能全绿。
 
-| 模块 | 说明 | 源码 | 状态 |
-|------|------|------|------|
-| crypto | AES-256-GCM 信封、scrypt KDF(NFKC)、wrap/unwrap、base32 | `packages/core/src/crypto/` | ✅ 稳定 |
-| vault | MK 主密钥 + 主密码/恢复密钥双路解锁 + 改密 | `packages/core/src/vault/` | ✅ 稳定 |
-| bundle | manifest v1、encMeta、不透明 ID、严格校验 | `packages/core/src/bundle/` | ✅ 稳定 |
-| chunker | 分片(可选 gzip)加密/还原、AAD 绑定、内存与文件大小解耦 | `packages/core/src/chunker/` | ✅ 稳定 |
-| store | BundleStore 抽象 + Local/Memory 实现 | `packages/core/src/store/` | ✅ 稳定 |
-| resource | packResource/unpackResource/openPreview 编排 | `packages/core/src/resource/` | ✅ 稳定 |
-| baidu | OAuth2 + precreate/superfile2/create/list/download + BaiduBundleStore | `packages/core/src/baidu/` | ✅ 代码完成（联网待验） |
-| account/keystore/config | 多账号、设备密钥加密 SecretStore、配置目录 | `packages/core/src/{account,keystore,config}/` | ✅ 稳定 |
-| CLI `bz` | init/unlock/lock/passwd/recover/login/logout/account/push/pull/ls/info/rm/share/preview | `packages/cli/src/` | ✅ 稳定（离线实测） |
-| preview | ffmpeg 图片/视频缩略、音频片段 → DEK 加密 | `packages/cli/src/preview.ts` | ✅ 实测 |
-| export7z | 头部加密 7z-AES 导出（需 7z 二进制） | `packages/cli/src/export7z.ts` | ✅ 代码完成（本机无 7z） |
-| CI | 三平台 typecheck + bun test | `.github/workflows/ci.yml` | ✅ |
+### 设计与计划（已就绪）
+- 设计：`docs/superpowers/specs/2026-07-23-cloud-filesystem-layer-design.md`（已确认）
+- 计划：`docs/superpowers/plans/2026-07-23-cloud-fs-phase1-roots-and-tree.md`（Phase 1）
+- Phase 2–4（上传/下载映射含 `-r` 整树备份、mv/cp/rename、回收站）各出独立计划。
 
-**测试：** `bun test` 73 项全绿；`pnpm run typecheck` 双包通过。CLI 端到端实测：push→pull 字节级一致、篡改分片被拒、错主密码被拒、ffmpeg 预览往返有效 JPEG。
+### Phase 1 任务状态
 
-### M0 已闭合 ✅（2026-07-23 真实百度往返通过）
+| 任务 | 所属模块 | 责任人 | 状态 |
+|------|----------|--------|------|
+| Task 1 双本地根解析（config） | config | AI | ⏳ 待开始 |
+| Task 2 cloudpath 纯函数 | cloudpath | AI | ⏳ 待开始 |
+| Task 3 BaiduClient.mkdir + BaiduBundleStore cloudDir | baidu | AI | ⏳ 待开始 |
+| Task 4 Backend 抽象 + LocalBackend | backend | AI | ⏳ 待开始 |
+| Task 5 BaiduBackend + 导出 | backend | AI | ⏳ 待开始 |
+| Task 6 CLI runtime keyRoot/fileRoot + makeBackend | cli/runtime | AI | ⏳ 待开始 |
+| Task 7 `bz mkdir` / `bz ls -r` / `push --to` | cli/commands | AI | ⏳ 待开始 |
+| Task 8 登记表同步 + 阶段收尾 | 文档 | AI | ⏳ 待开始 |
 
-- 500MB 加密文件真实上传→下载→**字节级一致**；**云端未限制/封禁** → 全案前提成立。
-- 实测吞吐：上行 ≈5.5MB/s、下行 ≈1.1MB/s（免费账号 dlink 限速）；无限流/重试触发。详见 `tech-spec §5`。
+### 各模块状态（本 Sprint 相关）
 
-### 待办
-
-| 优先级 | 任务 | 责任人 | 状态 |
-|-------|------|--------|------|
-| — | M0 关键验证（真实往返 + 云端不限制） | 人工（H-02） | ✅ 已完成 |
-| — | 吞吐实测（上/下行已测并记录） | 人工（H-03） | ✅ 基本完成（如需更精确配额可后续压测） |
-| — | >4GB 分片 + 还原字节一致 | AI | ✅ 本地已证（4.29GiB→44 片） |
-| P2 | 发布：生成 Homebrew/Scoop manifest（已就绪）+ npm publish + 传 GitHub Release（需渠道账号 H-05） | AI+人工 | 产物就绪，待人工发布 |
-
-### 近期重要改动记录
-
-| 时间 | 改动目的 | 涉及模块 |
-|------|---------|---------|
-| 2026-07-23 | 搭 monorepo + crypto 内核（信封/KDF/wrap）58 测试 | crypto/errors |
-| 2026-07-23 | vault 主密钥架构 + base32 恢复密钥 | vault |
-| 2026-07-23 | bundle/manifest v1 + encMeta + 严格校验 | bundle |
-| 2026-07-23 | 分片器 + 资源编排：完整加密往返（字节级一致） | chunker/store/resource |
-| 2026-07-23 | 百度 OAuth + 文件 API + BaiduBundleStore（mock 测试） | baidu |
-| 2026-07-23 | 配置/设备密钥 SecretStore/多账号 | config/keystore/account |
-| 2026-07-23 | CLI bz 全命令 + 端到端实测 | packages/cli |
-| 2026-07-23 | ffmpeg 预览 + 7z-AES 导出 | cli/preview,export7z |
-| 2026-07-23 | 三平台 CI + agent Skill | .github, cli/skill |
+| 模块 | 状态 | 备注 |
+|------|------|------|
+| config（core） | 待改 | 加双根解析 |
+| cloudpath（core） | 待建 | 新模块 |
+| backend（core） | 待建 | 新模块（Local/Baidu） |
+| baidu（core） | 待改 | 加 mkdir + store cloudDir |
+| cli runtime/commands | 待改 | fileRoot + mkdir/ls |
 
 ### 活跃文件清单
 
-> 当前无进行中的半成品改动；已提交至 feature/init_proj。
+> 当前无进行中的半成品改动（计划文档已提交，尚未开始 Phase 1 编码）。
+
+### 近期重要改动记录
+
+| 时间 | 改动目的 | 涉及 |
+|------|---------|------|
+| 2026-07-23 | Sprint 0（M0+M1）完成并归档；补齐登记表状态（含 chunker/发版的诚实修正） | `.claude/*`、`archive/sprint-0-m0-m1.md` |
+| 2026-07-23 | v2 云端 FS 层设计确认 + Phase 1 实现计划就绪 | `docs/superpowers/{specs,plans}/` |
