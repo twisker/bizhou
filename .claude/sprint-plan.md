@@ -128,8 +128,16 @@
 
 **验收：** `bun test` 105 全绿 + 1 skip；typecheck/lint/build 全过；每任务子代理实现+评审，修复 2 处路径穿越（--out `meta.name`、name 未净化）。
 
-### v2-Phase 3 — 文件操作
-> `mv`、`cp`(`-r`)、`rename`（bundle=改 encMeta / 目录=native）。
+### v2-Phase 3 — 文件操作 ✅ **完成（2026-07-23）**
+> 计划：`docs/superpowers/plans/2026-07-23-cloud-fs-phase3-file-ops.md`
+
+| 任务 | 说明 | 状态 |
+|-----|------|------|
+| T1 | filemanager move/copy/rename + Backend 目录级 move/copy/rename（含 rename newName 单段校验防穿越） | ✅ |
+| T2 | `renameResource`（bundle 真名=重写 encMeta，分片不动） | ✅ |
+| T3 | `bz mv` / `cp`(`-r`) / `rename`（目录 native / bundle encMeta；分派只对"未找到"回退目录） | ✅ |
+
+**验收：** `bun test` 122 全绿 + 1 skip；typecheck/lint/build 全过；修复 2 处 Important（rename 穿越、分派吞错）。
 
 ### v2-Phase 4 — 回收站
 > `rm`→百度原生回收站（`-r`/`--yes`）；`trash list/restore/rm/clear`（原生，开放 API 不支持则提示去百度 App）；联网验证回收站 API 支持度。

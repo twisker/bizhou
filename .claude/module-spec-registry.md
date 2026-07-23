@@ -41,7 +41,7 @@
 
 | 模块 | 说明 | 设计文档 | 源代码目录 | 状态 |
 |------|------|---------|----------|------|
-| commands | init/unlock/lock/passwd/recover/login/logout/account/**mkdir**/ls(`-r`)/push(`--to`/`-r`)/pull(`-r`)/info/rm/share/preview；递归 bundle 解析 + 上传下载映射 | PRD §14 + spec 2026-07-23 | `packages/cli/src/commands.ts` | ✅ 稳定 |
+| commands | init/unlock/lock/passwd/recover/login/logout/account/**mkdir**/ls(`-r`)/push(`--to`/`-r`)/pull(`-r`)/info/rm/share/preview/**mv**/**cp**(-r)/**rename**；递归解析 + 上传下载映射 + 文件操作 | PRD §14 + spec 2026-07-23 | `packages/cli/src/commands.ts` | ✅ 稳定 |
 | runtime | .env 加载、配置目录、SecretStore/账号装配、MK 解析、Baidu 客户端（token 刷新） | 本仓库约定 | `packages/cli/src/runtime.ts` | ✅ 稳定 |
 | prompt | 隐藏口令输入、`--password-stdin`/环境变量 | PRD §14 | `packages/cli/src/prompt.ts` | ✅ 稳定 |
 | render | 颜色、进度条、字节格式化、退出码映射 | 本仓库约定 | `packages/cli/src/render.ts` | ✅ 稳定 |
