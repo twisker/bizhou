@@ -2,11 +2,14 @@ import { describe, expect, test } from "bun:test";
 import {
   cloudBasename,
   cloudDirname,
+  defaultUploadCloudDir,
+  downloadLocalPath,
   joinCloudPath,
   normalizeCloudPath,
   splitCloudPath,
 } from "../src/cloudpath/index.ts";
 import { InvalidArgError } from "../src/errors.ts";
+import { join, sep } from "node:path";
 
 describe("normalizeCloudPath", () => {
   test("加前导斜杠、折叠、去尾", () => {
@@ -45,5 +48,23 @@ describe("join/dirname/basename/split", () => {
   });
   test("split", () => {
     expect(splitCloudPath("/工作/报告.pdf")).toEqual({ dir: "/工作", base: "报告.pdf" });
+  });
+});
+
+describe("上传/下载映射", () => {
+  const fr = join(sep, "home", "u", "Downloads"); // 跨平台绝对根
+  test("defaultUploadCloudDir：来源在文件根下→镜像父目录", () => {
+    expect(defaultUploadCloudDir(join(fr, "工作", "报告.pdf"), fr)).toBe("/工作");
+    expect(defaultUploadCloudDir(join(fr, "报告.pdf"), fr)).toBe("/"); // 直接在根下
+    expect(defaultUploadCloudDir(join(fr, "工作", "2026", "a.bin"), fr)).toBe("/工作/2026");
+  });
+  test("defaultUploadCloudDir：来源在文件根外→云端根", () => {
+    expect(defaultUploadCloudDir(join(sep, "tmp", "foo.pdf"), fr)).toBe("/");
+  });
+  test("downloadLocalPath：文件根 + 云端相对 + 名", () => {
+    expect(downloadLocalPath(fr, "/工作/2026", "报告.pdf")).toBe(
+      join(fr, "工作", "2026", "报告.pdf"),
+    );
+    expect(downloadLocalPath(fr, "/", "a.bin")).toBe(join(fr, "a.bin"));
   });
 });

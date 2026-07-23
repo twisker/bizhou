@@ -3,6 +3,7 @@
  * 不碰 IO，供上传/下载映射与目录寻址复用。
  */
 
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { InvalidArgError } from "../errors.ts";
 
 /**
@@ -37,4 +38,22 @@ export function cloudBasename(p: string): string {
 
 export function splitCloudPath(p: string): { dir: string; base: string } {
   return { dir: cloudDirname(p), base: cloudBasename(p) };
+}
+
+/**
+ * 上传缺省云端目录：让 sourceAbs 落到相对文件根的镜像位置。
+ * 取 sourceAbs 的父目录相对 fileRoot 的路径；在文件根外则回云端根 "/"。
+ */
+export function defaultUploadCloudDir(sourceAbs: string, fileRoot: string): string {
+  const rel = relative(fileRoot, dirname(sourceAbs));
+  // 在文件根外：相对路径以 ".." 开头或为绝对路径
+  if (rel === "") return "/";
+  if (isAbsolute(rel) || rel.split(/[/\\]/)[0] === "..") return "/";
+  return normalizeCloudPath(rel);
+}
+
+/** 下载落地本地绝对路径：fileRoot + 云端目录各段 + 文件名。 */
+export function downloadLocalPath(fileRoot: string, cloudDir: string, name: string): string {
+  const segs = normalizeCloudPath(cloudDir).split("/").filter(Boolean);
+  return join(fileRoot, ...segs, name);
 }
