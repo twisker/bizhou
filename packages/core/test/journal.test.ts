@@ -76,18 +76,21 @@ describe("上传日志", () => {
       await writeFile(badShape, JSON.stringify({ bundleId: "x", doneChunks: [] }), "utf8");
       expect(await readJournal(badShape)).toBeNull();
 
-      // 仅缺 wrappedKey（其余字段齐全）也应拒收：续传无从还原 DEK，绝不能当有效日志用。
+      // wrappedKey/chunkSize/compression 现为上传专属可选字段（下载日志用不到）：
+      // 单独缺失其一、其余必需字段齐全时，应仍视为合法（读回该字段为 undefined）。
       const noWrapped = join(dir, "no-wrapped.json");
       const { wrappedKey: _omit, ...withoutWrapped } = entry();
       await writeFile(noWrapped, JSON.stringify(withoutWrapped), "utf8");
-      expect(await readJournal(noWrapped)).toBeNull();
+      const gotNoWrapped = await readJournal(noWrapped);
+      expect(gotNoWrapped).not.toBeNull();
+      expect(gotNoWrapped?.wrappedKey).toBeUndefined();
 
-      // 缺 chunkSize/compression（续传定钉分片映射的关键字段）也必须拒收：
-      // 否则续传只能回退本次 flag，重蹈确定性 IV 的 nonce 复用。
       const noChunkSize = join(dir, "no-chunksize.json");
       const { chunkSize: _cs, ...withoutChunkSize } = entry();
       await writeFile(noChunkSize, JSON.stringify(withoutChunkSize), "utf8");
-      expect(await readJournal(noChunkSize)).toBeNull();
+      const gotNoChunkSize = await readJournal(noChunkSize);
+      expect(gotNoChunkSize).not.toBeNull();
+      expect(gotNoChunkSize?.chunkSize).toBeUndefined();
 
       const badCompression = join(dir, "bad-compression.json");
       await writeFile(badCompression, JSON.stringify({ ...entry(), compression: "zstd" }), "utf8");
@@ -103,5 +106,49 @@ describe("上传日志", () => {
     expect(isLockAlive(e, { ttlMs: 60_000, now: t0 + 10_000, pidAlive: true })).toBe(true);
     expect(isLockAlive(e, { ttlMs: 60_000, now: t0 + 120_000, pidAlive: false })).toBe(false);
     expect(isLockAlive(e, { ttlMs: 60_000, now: t0 + 10_000, pidAlive: false })).toBe(true);
+  });
+});
+
+describe("下载日志（journal 复用，上传专属字段可选）", () => {
+  test("下载态 entry 省略 wrappedKey/chunkSize/compression → write→read 往返仍合法", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bizhou-jnl-dl-"));
+    try {
+      const { wrappedKey: _wk, chunkSize: _cs, compression: _cp, ...downloadEntry } = entry();
+      const p = journalPath(dir, "download", downloadEntry.contentId, downloadEntry.cloudDir);
+      await writeJournal(p, downloadEntry as JournalEntry);
+      const got = await readJournal(p);
+      expect(got).not.toBeNull();
+      expect(got?.bundleId).toBe("abc123");
+      expect(got?.wrappedKey).toBeUndefined();
+      expect(got?.chunkSize).toBeUndefined();
+      expect(got?.compression).toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("必需字段仍必查：pid/startedAt 类型不符或缺失 → null（未受可选字段改动影响）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bizhou-jnl-req-"));
+    try {
+      const { pid: _pid, ...withoutPid } = entry();
+      const noPid = join(dir, "no-pid.json");
+      await writeFile(noPid, JSON.stringify(withoutPid), "utf8");
+      expect(await readJournal(noPid)).toBeNull();
+
+      const badPid = join(dir, "bad-pid.json");
+      await writeFile(badPid, JSON.stringify({ ...entry(), pid: "4242" }), "utf8");
+      expect(await readJournal(badPid)).toBeNull();
+
+      const { startedAt: _sa, ...withoutStartedAt } = entry();
+      const noStartedAt = join(dir, "no-started-at.json");
+      await writeFile(noStartedAt, JSON.stringify(withoutStartedAt), "utf8");
+      expect(await readJournal(noStartedAt)).toBeNull();
+
+      const badStartedAt = join(dir, "bad-started-at.json");
+      await writeFile(badStartedAt, JSON.stringify({ ...entry(), startedAt: 123 }), "utf8");
+      expect(await readJournal(badStartedAt)).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

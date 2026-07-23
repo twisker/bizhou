@@ -23,15 +23,18 @@ export interface JournalEntry {
    * 而 seq→明文的映射还取决于 chunkSize 与 compression；若续传改用不同取值，则同一
    * (DEK, bundleId, seq) 会覆盖不同明文 → AES-GCM nonce 复用（机密性击穿 + tag 伪造）。
    * 固定这两项后 seq→明文稳定，重加密逐字节可复现，绝不复用 (key, IV) 于不同明文。
+   * 上传专属：下载日志用不到（下载不重新加密，无 nonce 复用风险），可省略。
    */
-  readonly chunkSize: number;
-  readonly compression: Compression;
+  readonly chunkSize?: number;
+  /** 上传专属：固定压缩方式（理由同 chunkSize）。下载省略。 */
+  readonly compression?: Compression;
   /**
    * 该 bundle 的 DEK 被 MK 包裹后的 base64 blob（与 manifest.wrappedKey 同等保护）。
    * 续传时据此还原出与首次相同的 DEK，保证已上传分片与新 manifest 用同一 DEK。
    * 注意：这是 MK 包裹后的密文，绝非裸密钥；日志仅存于本地 keyRoot 下、绝不上云、绝不打印。
+   * 上传专属：下载日志不需要重新封装 DEK，可省略。
    */
-  readonly wrappedKey: string;
+  readonly wrappedKey?: string;
   readonly startedAt: string; // ISO8601，CLI 注入
   readonly pid: number; // CLI 注入
 }
@@ -49,23 +52,29 @@ export function journalPath(
   return join(keyRoot, KIND_DIR[kind], `${contentId}@${destHash}.json`);
 }
 
-/** 校验解析出的对象是否具备 JournalEntry 的完整形状（全字段类型），拒绝任何字段缺失/类型不符。 */
+/**
+ * 校验解析出的对象是否具备 JournalEntry 的形状：必需字段（bundleId/cloudDir/contentId/
+ * doneChunks/totalChunks/startedAt/pid）始终校验；上传专属字段（wrappedKey/chunkSize/
+ * compression）若存在才校验类型——下载态日志省略它们仍视为合法。
+ */
 function isValidJournalEntry(e: unknown): e is JournalEntry {
   if (typeof e !== "object" || e === null) return false;
   const o = e as Record<string, unknown>;
-  return (
+  const common =
     typeof o.bundleId === "string" &&
     typeof o.cloudDir === "string" &&
     typeof o.contentId === "string" &&
     Array.isArray(o.doneChunks) &&
     o.doneChunks.every((n) => typeof n === "number") &&
     typeof o.totalChunks === "number" &&
-    typeof o.chunkSize === "number" &&
-    (o.compression === "none" || o.compression === "gzip") &&
-    typeof o.wrappedKey === "string" &&
     typeof o.startedAt === "string" &&
-    typeof o.pid === "number"
-  );
+    typeof o.pid === "number";
+  if (!common) return false;
+  if (o.wrappedKey !== undefined && typeof o.wrappedKey !== "string") return false;
+  if (o.chunkSize !== undefined && typeof o.chunkSize !== "number") return false;
+  if (o.compression !== undefined && o.compression !== "none" && o.compression !== "gzip")
+    return false;
+  return true;
 }
 
 export async function readJournal(path: string): Promise<JournalEntry | null> {

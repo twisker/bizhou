@@ -132,6 +132,8 @@ export interface UnpackOptions {
   readonly mk: Buffer;
   readonly store: BundleStore;
   readonly outPath: string;
+  /** 续传：这些 seq 已写入 outPath，跳过下载/解密，仅推进写入偏移。 */
+  readonly skip?: readonly number[];
   readonly onProgress?: ProgressCallback;
 }
 
@@ -153,6 +155,7 @@ export async function unpackResource(opts: UnpackOptions): Promise<UnpackResult>
     compression: manifest.compression,
     store: opts.store,
     outPath: opts.outPath,
+    skip: opts.skip,
     onProgress: opts.onProgress,
   });
   return { manifest, meta, bytesWritten };

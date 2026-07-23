@@ -96,19 +96,34 @@ export interface DecryptFileOptions {
   readonly compression: Compression;
   readonly store: BundleStore;
   readonly outPath: string;
+  /** 续传：这些 seq 已写入 outPath，跳过下载/解密，仅推进写入偏移。 */
+  readonly skip?: readonly number[];
   readonly onProgress?: ProgressCallback;
 }
 
-/** 逐片读出、校验、解密、还原到 outPath。任何校验失败即抛错，绝不静默写出损坏数据。 */
+/**
+ * 逐片读出、校验、解密、按偏移写入 outPath。任何校验失败即抛错，绝不静默写出损坏数据。
+ * skip 内的 seq 视为已在文件中（续传场景），跳过下载/解密，仅推进写入偏移。
+ */
 export async function decryptChunksToFile(
   opts: DecryptFileOptions,
 ): Promise<{ bytesWritten: number }> {
   const totalChunks = opts.chunks.length;
   const bytesTotal = opts.chunks.reduce((a, c) => a + c.plainSize, 0);
+  const skip = new Set(opts.skip ?? []);
+  const resuming = skip.size > 0;
   let bytesDone = 0;
-  const fh = await open(opts.outPath, "w");
+  // 续传写已存在的 .part 用 "r+"（保留已写字节、可越界写）；否则 "w"（新建/截断）。
+  const fh = await open(opts.outPath, resuming ? "r+" : "w");
   try {
+    let position = 0;
     for (const info of opts.chunks) {
+      if (skip.has(info.seq)) {
+        position += info.plainSize; // 该片已在文件中，跳过写入、仅推进偏移
+        bytesDone += info.plainSize;
+        opts.onProgress?.({ phase: "decrypt", seq: info.seq, totalChunks, bytesDone, bytesTotal });
+        continue;
+      }
       const ct = await opts.store.getChunk(info.seq);
       if (sha256hex(ct) !== info.sha256) {
         throw new BizhouError("CHUNK", `分片 ${info.seq} 密文 sha256 校验失败（数据损坏或被篡改）`);
@@ -123,10 +138,12 @@ export async function decryptChunksToFile(
           `分片 ${info.seq} 还原长度 ${plain.length} 与 manifest plainSize ${info.plainSize} 不符`,
         );
       }
-      await fh.write(plain, 0, plain.length);
+      await fh.write(plain, 0, plain.length, position); // 定位写入（支持续传乱序补齐）
+      position += plain.length;
       bytesDone += plain.length;
       opts.onProgress?.({ phase: "decrypt", seq: info.seq, totalChunks, bytesDone, bytesTotal });
     }
+    await fh.truncate(position); // 收尾：精确文件长度（防旧 .part 更长残留尾字节）
     return { bytesWritten: bytesDone };
   } finally {
     await fh.close();

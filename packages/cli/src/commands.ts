@@ -380,6 +380,18 @@ export async function pushOneFile(
       return { bundleId: existing.bundleId, status: "locked" };
     }
     // 崩溃残留（或 --force 复用）→ 续传：复用 bundleId + doneChunks + 同一 DEK + 同一分片/压缩。
+    // wrappedKey/chunkSize/compression 在 JournalEntry 类型上为可选（下载日志用不到），
+    // 但上传日志（本分支）在写入时（见下文 writeJournal）必写这三项；缺失即日志损坏/被篡改。
+    if (
+      existing.wrappedKey === undefined ||
+      existing.chunkSize === undefined ||
+      existing.compression === undefined
+    ) {
+      throw new BizhouError(
+        "INVALID_ARG",
+        `上传日志缺少必要字段（wrappedKey/chunkSize/compression），无法续传：${jpath}`,
+      );
+    }
     bundleId = existing.bundleId;
     skipExisting = existing.doneChunks;
     dek = unwrapDek(mk, existing.wrappedKey);
