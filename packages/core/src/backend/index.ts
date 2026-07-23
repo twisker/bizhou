@@ -13,3 +13,6 @@ export interface Backend {
   /** 取某目录下某 bundle 的读写句柄。 */
   bundleStore(bundleId: string, cloudDir: string): BundleStore;
 }
+
+export { BaiduBackend } from "./baidu.ts";
+export { LocalBackend } from "./local.ts";
