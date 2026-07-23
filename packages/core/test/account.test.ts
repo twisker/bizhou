@@ -3,26 +3,10 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AccountManager } from "../src/account/index.ts";
-import { configPaths, resolveConfigDir } from "../src/config/index.ts";
+import { configPaths } from "../src/config/index.ts";
 import { FileSecretStore, MemorySecretStore } from "../src/keystore/index.ts";
 
-describe("config 目录解析", () => {
-  test("BIZHOU_CONFIG_DIR 优先", () => {
-    expect(resolveConfigDir({ BIZHOU_CONFIG_DIR: "/x/y" }, "linux")).toBe("/x/y");
-  });
-  test("各平台默认路径", () => {
-    expect(resolveConfigDir({ HOME: "/home/u" }, "darwin")).toBe(
-      "/home/u/Library/Application Support/bizhou",
-    );
-    expect(resolveConfigDir({ APPDATA: "C:\\Users\\u\\AppData\\Roaming" }, "win32")).toContain(
-      "bizhou",
-    );
-    expect(resolveConfigDir({ HOME: "/home/u" }, "linux")).toBe("/home/u/.config/bizhou");
-    expect(resolveConfigDir({ HOME: "/home/u", XDG_CONFIG_HOME: "/cfg" }, "linux")).toBe(
-      "/cfg/bizhou",
-    );
-  });
-});
+// 配置根解析测试已迁移到 config.test.ts（双本地根）。
 
 describe("AccountManager（内存 store）", () => {
   test("首个账号自动设为当前；增删改查", async () => {
