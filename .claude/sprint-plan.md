@@ -212,7 +212,11 @@
 | D1-T4 | 跨平台递归 watcher + 防抖（debounce/listDirsRecursive 可测；fs.watch 薄壳手动验证） | AI | ✅ 已完成 |
 | D1-T5 | `bz daemon` 三触发编排 + `SerialJobRunner` 串行护栏 + 优雅退出 + config 间隔/防抖 | AI | ✅ 已完成 |
 
-**范围/语义：** 注册式备份任务；三触发（启动即扫 / 实时监听防抖 / 定时兜底）共用幂等 `sweepJob`；**备份语义永不删云**（本地删不镜像）；前台进程、SIGINT/SIGTERM 优雅退出；MK 驻内存至退出。**测试边界：** 模型/引擎/防抖/串行护栏纯逻辑自动化覆盖；`fs.watch` OS 事件与完整 daemon 长跑 = 手动/集成验证（待人工真机验证，见 `人工TODO事项.md`）。**红线：** daemon 不打印密钥；加密全复用 S1；零新依赖。
+**范围/语义：** 注册式备份任务；三触发（启动即扫 / 实时监听防抖 / 定时兜底）共用幂等 `sweepJob`；**备份语义永不删云**（本地删不镜像）；前台进程、SIGINT/SIGTERM 优雅退出；MK 驻内存至退出。**测试边界：** 模型/引擎/防抖/串行护栏纯逻辑自动化覆盖；`fs.watch` OS 事件与完整 daemon 长跑 = 手动/集成验证（待人工真机验证 H-09）。**红线：** daemon 不打印密钥；加密全复用 S1；零新依赖。
+
+**验收（达成）：** `bun test` **181 全绿 + 1 skip**；typecheck/lint/build(3) 全过。opus 整分支最终评审 **✅ Ready to merge**（安全红线全过：不打印密钥、MK 全退出路径 `finally` 抹除、永不删云；镜像路径与 `push -r` 逐字一致；跨进程靠 S1 在飞锁防重传）。
+**评审拦下并修复的 Important（各任务）：** ①`readBackups` 读失败吞错→会截断任务注册（改：ENOENT/损坏→[]，其它 IO 错误→抛）+ 唯一 tmp 防并发写 clobber（T1）②`watchRecursive.stop()` 与异步注册竞态→泄漏 FSWatcher/卡退出（改：`stopped` 守卫）（T4）③`SerialJobRunner` run() 抛错→丢合并补跑 & `drain()` reject 致退出挂死（改：loop 吞逃逸异常）+ daemon `try/finally` 抹 MK + `once` 信号 + drain `.catch`（T5）。
+**已知限制（defer）：** `bz backup add` 与运行中 daemon 的 `updateLastBackup` 对 `backups.json` 有 last-writer-wins 竞态，极端下新加任务可能被覆盖——单用户工具、`backup list` 可见、重跑 add 即修复；不损云端数据。id 为 32-bit 随机（个人规模碰撞可忽略）；空源目录不建空云端镜像目录。
 
 ### Phase 3 · 其余候选（待细化）
 
