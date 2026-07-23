@@ -8,7 +8,7 @@
 
 ---
 
-## 当前 Sprint：Phase 3 · S1 — 健壮上传（并发 + 续传 + 幂等）
+## 当前 Sprint：Phase 3 · S1 — 健壮上传 ✅ 完成（2026-07-23，待人工 git flow 合并）
 
 **最后更新：** 2026-07-23
 
@@ -20,19 +20,19 @@
 ### 任务状态
 | 任务 | 说明 | 状态 |
 |-----|------|------|
-| S1-T1 | contentId 底座（HKDF+HMAC，存加密 encMeta） | ⬜ 待开始 |
-| S1-T2 | uploadPart 限流池并发 + fail-fast | ⬜ 待开始 |
-| S1-T3 | 上传日志（锁 + 续传状态） | ⬜ 待开始 |
-| S1-T4 | manifest 缓存 + 失效钩子 | ⬜ 待开始 |
+| S1-T1 | contentId 底座（HKDF+HMAC，存加密 encMeta） | ✅ 已完成 |
+| S1-T2 | uploadPart 限流池并发 + fail-fast | ✅ 已完成 |
+| S1-T3 | 上传日志（锁 + 续传状态） | ✅ 已完成 |
+| S1-T4 | manifest 缓存 + 失效钩子 | ✅ 已完成 |
 | S1-T5 | cmdPush 集成（去重/锁/续传/--force/--concurrency） | ✅ 已完成（2026-07-23） |
-| S1-T6 | push -r 递归复用 pushOneFile | ⬜ 待开始 |
+| S1-T6 | push -r 递归复用 pushOneFile | ✅ 已完成 |
 
 ### 已完成里程碑（均归档于 `.claude/archive/`）
 - **M0 + M1**（加密引擎 + CLI）→ `sprint-0-m0-m1.md`
 - **v2 Phase 1–4 整体**（目录树 / 映射 / 整树备份 / mv-cp-rename / 回收站）→ `v2-cloud-fs.md`
 
 ### 代码状态
-- 分支 `feature/init_proj`；`bun test` 147 全绿 + 1 skip（S1-T5 完成后，含新增 push-idempotency 4 测试）。
+- 分支 `feature/phase3`；`bun test` **155 全绿 + 1 skip**；typecheck/lint/build(3) 全过。S1 全 6 任务完成、opus 整分支评审 ✅ Ready to merge（拦下并修复 2 Critical crypto + 2 Important，见 sprint-plan S1 验收）。
 - v2 已由人工合并至 `dev`；S1 开发分支由人工按 git flow 管理。
 
 ### 待人工触发（并行）

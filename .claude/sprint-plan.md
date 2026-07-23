@@ -158,7 +158,7 @@
 > 候选池：shell 补全、更多预览类型、daemon/定时备份、进 homebrew-core / winget、worker_threads 并行加密。
 > **子项各自 spec→plan→执行。已澄清并定型的子项在下方按 Sprint 拆分。**
 
-### Phase 3 · S1 — 健壮上传（并发 + 续传 + 幂等） 🚧 **进行中**
+### Phase 3 · S1 — 健壮上传（并发 + 续传 + 幂等） ✅ **完成（2026-07-23）**
 
 > 设计：`docs/superpowers/specs/2026-07-23-robust-upload-download-design.md`
 > 计划：`docs/superpowers/plans/2026-07-23-robust-upload-s1.md`（含各任务完整 TDD 步骤与代码）
@@ -170,14 +170,19 @@
 
 | 任务 | 说明 | 责任人 | 状态 |
 |-----|------|--------|------|
-| S1-T1 | `contentId` 内容身份底座：HKDF(MK) 派生 + HMAC(明文)，存加密 encMeta；`ResourceMeta`/`PackOptions` 接线；`info` 显示 | AI | ⬜ 待开始 |
-| S1-T2 | `uploadPart` 4MB 分片限流池并发（默认 4，clamp[1,16]）+ AbortController fail-fast；`withRetry`/`uploadSlice` 支持 signal | AI | ⬜ 待开始 |
-| S1-T3 | 上传日志模块（`journal/`）：一份 JSON 兼作 在飞锁 + 续传状态；核心不读时钟（now/pid 注入） | AI | ⬜ 待开始 |
-| S1-T4 | manifest 缓存模块（`cache/`，只存加密态）+ `rename`/`rm`/`trash` 失效钩子 | AI | ⬜ 待开始 |
+| S1-T1 | `contentId` 内容身份底座：HKDF(MK) 派生 + HMAC(明文)，存加密 encMeta；`ResourceMeta`/`PackOptions` 接线；`info` 显示 | AI | ✅ 已完成 |
+| S1-T2 | `uploadPart` 4MB 分片限流池并发（默认 4，clamp[1,16]）+ AbortController fail-fast；`withRetry`/`uploadSlice` 支持 signal | AI | ✅ 已完成 |
+| S1-T3 | 上传日志模块（`journal/`）：一份 JSON 兼作 在飞锁 + 续传状态；核心不读时钟（now/pid 注入） | AI | ✅ 已完成 |
+| S1-T4 | manifest 缓存模块（`cache/`，只存加密态）+ `rename`/`rm`/`trash` 失效钩子 | AI | ✅ 已完成 |
 | S1-T5 | `cmdPush` 集成：预哈希→去重（走缓存）→锁/续传→`--force`/`--concurrency`→消息；抽出共用 `pushOneFile` | AI | ✅ 已完成（2026-07-23） |
-| S1-T6 | `push -r` 递归复用 `pushOneFile`，整树去重/续传/锁一致 | AI | ⬜ 待开始 |
+| S1-T6 | `push -r` 递归复用 `pushOneFile`，整树去重/续传/锁一致 | AI | ✅ 已完成 |
 
-**验收：** 新增 content/journal/cache 三模块单测 + push 幂等/续传/锁集成测试全绿；`bun test` 全量无回归；typecheck/lint/build 全过；安全红线（contentId 仅入加密 encMeta、日志/缓存无密钥、缓存键防穿越、GCM 失败即抛）自检通过。
+**验收（达成）：** `bun test` **155 全绿 + 1 skip**；typecheck/lint/build(3) 全过。每任务子代理实现 + 评审，opus 整分支最终评审 **✅ Ready to merge**。
+**评审拦下的关键缺陷（均已修 + 补测）：**
+- **2 个 Critical crypto（T5）：** ①resume 重新生成 DEK → 续传出的 bundle 永不可解（修：journal 存 MK 包裹的 DEK，续传复用）；②确定性 chunk-IV 未固定 chunkSize/compression → 换 `--chunk`/`--compress` 续传即 **AES-GCM nonce 复用**（修：journal 固定 chunkSize+compression，续传强制沿用；tech-spec §5.1.1 记录 IV 方案与唯一性不变式）。
+- **Important：** journal 全字段形状校验（T3）；首推新云端目录 `listDir` 先于 `mkdir` → 百度后端抛错（T6/F1，修：`pushOneFile` 先 mkdir 再去重扫描 + strict-listDir 回归测试）。
+**安全红线自检通过：** contentId 仅入加密 encMeta（云端零泄露）；journal/cache 无明文密钥（journal 存 MK 包裹 DEK）；缓存键 `assertNameSegment` 防穿越、且 bundleId 不可变 → 陈旧缓存永不致错误去重；GCM 失败即抛不静默。
+**新增模块/测试：** `@bizhou/core` → `content`/`journal`/`cache`；测试 `content`/`journal`/`cache`/`upload-concurrency`/`push-idempotency`/`push-recursive-idempotency` + 内存后端夹具。
 
 ### Phase 3 · S2 — 健壮下载（幂等 + 续传） 📋 **已规划，待 S1 后**
 
