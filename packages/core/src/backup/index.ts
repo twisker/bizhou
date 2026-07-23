@@ -28,19 +28,30 @@ function backupsPath(keyRoot: string): string {
 }
 
 export async function readBackups(keyRoot: string): Promise<BackupJob[]> {
+  let raw: string;
   try {
-    const f = JSON.parse(await readFile(backupsPath(keyRoot), "utf8")) as BackupsFile;
+    raw = await readFile(backupsPath(keyRoot), "utf8");
+  } catch (err) {
+    if ((err as { code?: string }).code === "ENOENT") return []; // 尚未创建
+    // 其它 IO 错误（EACCES/EIO 等）不吞：否则 add/remove/update 的 read-modify-write
+    // 会误把"读失败"当"无任务"，写回时静默截断 backups.json（丢失任务注册）。
+    throw err;
+  }
+  try {
+    const f = JSON.parse(raw) as BackupsFile;
     if (!Array.isArray(f.jobs)) return [];
     return f.jobs.filter((j) => typeof j?.id === "string" && typeof j?.localDir === "string");
   } catch {
-    return []; // 缺失或损坏
+    return []; // 损坏 JSON：视为空（可被下次写入修复）
   }
 }
 
 async function writeBackups(keyRoot: string, jobs: BackupJob[]): Promise<void> {
   await mkdir(keyRoot, { recursive: true });
   const p = backupsPath(keyRoot);
-  const tmp = `${p}.tmp`;
+  // 唯一 tmp 名（pid + 随机）：避免两个并发写者（如 daemon updateLastBackup 撞手动 add）
+  // 争抢同一 tmp 文件而互相破坏。rename 本身原子，最坏是 last-writer-wins（可接受）。
+  const tmp = `${p}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
   await writeFile(tmp, JSON.stringify({ version: BACKUPS_VERSION, jobs }, null, 2), "utf8");
   await rename(tmp, p); // 原子替换
 }

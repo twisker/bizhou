@@ -57,4 +57,29 @@ describe("备份任务模型", () => {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test("jobs 非数组的 backups.json → readBackups 返回 []", async () => {
+    const root = await mkdtemp(join(tmpdir(), "bizhou-bk4-"));
+    try {
+      const { writeFile } = await import("node:fs/promises");
+      await writeFile(join(root, "backups.json"), JSON.stringify({ version: 1, jobs: {} }), "utf8");
+      expect(await readBackups(root)).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("updateLastBackup 对不存在的 id → 不改动文件（不新增、不清空）", async () => {
+    const root = await mkdtemp(join(tmpdir(), "bizhou-bk5-"));
+    try {
+      const j = await addBackup(root, { localDir: "/only", addedAt: "t" });
+      await updateLastBackup(root, "nonexistent", "2026-07-24T00:00:00Z");
+      const jobs = await readBackups(root);
+      expect(jobs.length).toBe(1);
+      expect(jobs[0]?.id).toBe(j.id);
+      expect(jobs[0]?.lastBackupAt).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
