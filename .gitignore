@@ -39,3 +39,6 @@ tmp/
 
 # 发版生成物（tarball + manifest）
 packaging/generated/
+
+# subagent-driven 进度台账（临时）
+.superpowers/
