@@ -8,7 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import {
   type Backend,
   BizhouError,
@@ -18,6 +18,7 @@ import {
   generateBundleId,
   generateKey,
   hashPlaintextFile,
+  joinCloudPath,
   journalPath,
   MemoryBundleStore,
   normalizeCloudPath,
@@ -27,7 +28,12 @@ import {
   wrapDek,
   writeJournal,
 } from "@bizhou/core";
-import { type PushOneOpts, type PushOneResult, pushOneFile } from "../../src/commands.ts";
+import {
+  type PushOneOpts,
+  type PushOneResult,
+  pushOneFile,
+  walkLocalFiles,
+} from "../../src/commands.ts";
 import type { Runtime } from "../../src/runtime.ts";
 
 /** 不存在的 pid（远超常见 pid_max），用作"已死"进程的探测目标。 */
@@ -105,6 +111,11 @@ class MemoryBackend implements Backend {
     return this.byBundleId.get(bundleId)?.store.putChunkCalls ?? [];
   }
 
+  /** 跨全部云端目录统计 bundle 总数（供整树幂等测试断言"不新增"）。 */
+  countAll(): number {
+    return this.byBundleId.size;
+  }
+
   /** 预置一个 bundle：仅含给定的已上传分片密文（不计入 putChunkCalls），无 manifest。模拟崩溃残留。 */
   async seedBundle(bundleId: string, cloudDir: string, chunks: Map<number, Buffer>): Promise<void> {
     const dir = normalizeCloudPath(cloudDir);
@@ -144,7 +155,19 @@ export interface MemoryFixture {
   readonly tmp: string;
   readonly mk: Buffer;
   pushOneFile(absFile: string, cloudDir: string, opts: PushOneOpts): Promise<PushOneResult>;
+  /**
+   * 整树 push：对 `srcRoot` 下所有文件（镜像为以 `srcRoot` basename 为根的云端目录树）
+   * 逐个复用 `pushOneFile`，统计各文件的落地状态。不经 `cmdPushRecursive`（其内部会调用
+   * 真实 `makeBackend`），而是直接对 `walkLocalFiles` 结果逐个调用同一 `pushOneFile` 内核，
+   * 与 `cmdPushRecursive` 的循环体逻辑一致。
+   */
+  pushRecursive(
+    srcRoot: string,
+    opts: PushOneOpts,
+  ): Promise<{ uploaded: number; skipped: number; locked: number; total: number }>;
   countBundles(cloudDir: string): Promise<number>;
+  /** 跨全部云端目录统计 bundle 总数（供整树幂等测试断言"不新增"）。 */
+  countAllBundles(): Promise<number>;
   writeLiveLock(absFile: string, cloudDir: string): Promise<{ bundleId: string }>;
   /**
    * 真·打包一次到内存 store（产出真实 DEK 加密的分片密文），随后模拟崩溃：
@@ -192,9 +215,29 @@ export async function makeMemoryFixture(): Promise<MemoryFixture> {
     async pushOneFile(absFile, cloudDir, opts) {
       return pushOneFile(rt, backend, mk, contentKey, absFile, normalizeCloudPath(cloudDir), opts);
     },
+    async pushRecursive(srcRoot, opts) {
+      const rootCloud = normalizeCloudPath(`/${basename(srcRoot)}`);
+      const files = await walkLocalFiles(srcRoot);
+      let uploaded = 0;
+      let skipped = 0;
+      let locked = 0;
+      for (const abs of files) {
+        const rel = relative(srcRoot, abs);
+        const relDir = dirname(rel);
+        const cloudDir = relDir === "." ? rootCloud : joinCloudPath(rootCloud, relDir);
+        const r = await pushOneFile(rt, backend, mk, contentKey, abs, cloudDir, opts);
+        if (r.status === "skipped-dup") skipped++;
+        else if (r.status === "locked") locked++;
+        else uploaded++;
+      }
+      return { uploaded, skipped, locked, total: files.length };
+    },
     async countBundles(cloudDir) {
       const { bundles } = await backend.listDir(cloudDir);
       return bundles.length;
+    },
+    async countAllBundles() {
+      return backend.countAll();
     },
     async writeLiveLock(absFile, cloudDir) {
       const contentId = await hashPlaintextFile(absFile, contentKey);
