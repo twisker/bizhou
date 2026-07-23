@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -62,6 +62,16 @@ describe("上传日志", () => {
     const dir = await mkdtemp(join(tmpdir(), "bizhou-jnl2-"));
     try {
       expect(await readJournal(join(dir, "nope.json"))).toBeNull();
+
+      // 无效 JSON：JSON.parse 抛出，走 catch 分支
+      const badJson = join(dir, "bad-json.json");
+      await writeFile(badJson, "{ not json", "utf8");
+      expect(await readJournal(badJson)).toBeNull();
+
+      // 合法 JSON 但形状不完整（缺 pid/startedAt 等字段）：走形状校验分支
+      const badShape = join(dir, "bad-shape.json");
+      await writeFile(badShape, JSON.stringify({ bundleId: "x", doneChunks: [] }), "utf8");
+      expect(await readJournal(badShape)).toBeNull();
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

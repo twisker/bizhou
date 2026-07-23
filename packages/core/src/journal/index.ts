@@ -33,11 +33,27 @@ export function journalPath(
   return join(keyRoot, KIND_DIR[kind], `${contentId}@${destHash}.json`);
 }
 
+/** 校验解析出的对象是否具备 JournalEntry 的完整形状（全字段类型），拒绝任何字段缺失/类型不符。 */
+function isValidJournalEntry(e: unknown): e is JournalEntry {
+  if (typeof e !== "object" || e === null) return false;
+  const o = e as Record<string, unknown>;
+  return (
+    typeof o.bundleId === "string" &&
+    typeof o.cloudDir === "string" &&
+    typeof o.contentId === "string" &&
+    Array.isArray(o.doneChunks) &&
+    o.doneChunks.every((n) => typeof n === "number") &&
+    typeof o.totalChunks === "number" &&
+    typeof o.startedAt === "string" &&
+    typeof o.pid === "number"
+  );
+}
+
 export async function readJournal(path: string): Promise<JournalEntry | null> {
   try {
     const raw = await readFile(path, "utf8");
-    const e = JSON.parse(raw) as JournalEntry;
-    if (typeof e.bundleId !== "string" || !Array.isArray(e.doneChunks)) return null;
+    const e: unknown = JSON.parse(raw);
+    if (!isValidJournalEntry(e)) return null;
     return e;
   } catch {
     return null; // 缺失或损坏
@@ -51,6 +67,7 @@ export async function writeJournal(path: string, entry: JournalEntry): Promise<v
   await rename(tmp, path); // 原子替换
 }
 
+// 非原子的读-改-写：仅在调用方对同一逻辑分片序列串行调用时才安全（并发调用会互相覆盖）。
 export async function appendDoneChunk(path: string, seq: number): Promise<void> {
   const e = await readJournal(path);
   if (!e) return; // 日志已被清理则无操作
