@@ -145,6 +145,26 @@ describe("uploadPart 编排（precreate→superfile2→create）", () => {
     expect(created).toBe(true); // 仍然 create 合并
   });
 
+  test("瞬时失败重试：分片上传前两次抛错、第三次成功 → 整体成功", async () => {
+    const data = randomBytes(TRANSFER_SLICE); // 1 片
+    let sliceAttempts = 0;
+    const http: HttpClient = async (url) => {
+      if (url.includes("precreate")) return jsonRes({ errno: 0, uploadid: "UP", block_list: [0] });
+      if (url.includes("superfile2")) {
+        sliceAttempts++;
+        if (sliceAttempts < 3) throw new Error("ETIMEDOUT（模拟瞬时网络失败）");
+        return jsonRes({ md5: "m" });
+      }
+      if (url.includes("create")) return jsonRes({ errno: 0, fs_id: 7 });
+      throw new Error("unexpected");
+    };
+    // baseMs 调小以免测试变慢
+    const client = new BaiduClient(CONFIG, "AT", http, { maxRetries: 3 });
+    const res = await client.uploadPart(`${APP_ROOT}/x.bz/000.part`, data);
+    expect(res.fsId).toBe(7);
+    expect(sliceAttempts).toBe(3); // 前两次失败被重试，第三次成功
+  });
+
   test("errno 非 0 → 抛 BizhouBAIDUError", async () => {
     const http: HttpClient = async (url) =>
       url.includes("precreate") ? jsonRes({ errno: 31034 }) : jsonRes({ errno: 0 });

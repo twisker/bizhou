@@ -49,6 +49,33 @@ function md5hex(b: Buffer): string {
   return createHash("md5").update(b).digest("hex");
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * 瞬时失败重试（指数退避）。用于上传/下载这类走 d.pcs 的网络重操作——
+ * 单个 4MB 分片偶发超时不应中断整份大文件。上传分片按 partseq+uploadid 幂等，重试安全。
+ */
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  opts: { tries?: number; baseMs?: number; onRetry?: (attempt: number, err: unknown) => void } = {},
+): Promise<T> {
+  const tries = opts.tries ?? 3;
+  const baseMs = opts.baseMs ?? 500;
+  let lastErr: unknown;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (i < tries - 1) {
+        opts.onRetry?.(i + 1, err);
+        await sleep(baseMs * 2 ** i);
+      }
+    }
+  }
+  throw lastErr;
+}
+
 function sliceTransfer(data: Buffer): Buffer[] {
   const parts: Buffer[] = [];
   for (let off = 0; off < data.length; off += TRANSFER_SLICE) {
@@ -65,11 +92,16 @@ function form(params: Record<string, string>): string {
 }
 
 export class BaiduClient {
+  private readonly maxRetries: number;
+
   constructor(
     readonly _config: OAuthConfig,
     private accessToken: string,
     private readonly http: HttpClient,
-  ) {}
+    opts: { maxRetries?: number } = {},
+  ) {
+    this.maxRetries = opts.maxRetries ?? 3;
+  }
 
   setAccessToken(token: string): void {
     this.accessToken = token;
@@ -181,7 +213,10 @@ export class BaiduClient {
     const need = new Set(blocksToUpload);
     for (let i = 0; i < slices.length; i++) {
       if (!need.has(i)) continue;
-      await this.uploadSlice(path, uploadid, i, slices[i]!);
+      // 瞬时失败重试：单片偶发超时不中断整份大文件（幂等：同 partseq+uploadid 可重传）。
+      await withRetry(() => this.uploadSlice(path, uploadid, i, slices[i]!), {
+        tries: this.maxRetries,
+      });
       onSlice?.(i, slices.length);
     }
     return this.create(path, data.length, uploadid, blockMd5);
@@ -231,14 +266,19 @@ export class BaiduClient {
     );
   }
 
-  /** 通过 dlink 下载文件字节。 */
+  /** 通过 dlink 下载文件字节（瞬时失败重试）。 */
   async download(dlink: string): Promise<Buffer> {
     const sep = dlink.includes("?") ? "&" : "?";
     const url = `${dlink}${sep}access_token=${encodeURIComponent(this.accessToken)}`;
-    const res = await this.http(url, { headers: { "User-Agent": "pan.baidu.com" } });
-    if (!res.ok) {
-      throw new BizhouError("BAIDU", `下载失败：HTTP ${res.status}`);
-    }
-    return Buffer.from(await res.arrayBuffer());
+    return withRetry(
+      async () => {
+        const res = await this.http(url, { headers: { "User-Agent": "pan.baidu.com" } });
+        if (!res.ok) {
+          throw new BizhouError("BAIDU", `下载失败：HTTP ${res.status}`);
+        }
+        return Buffer.from(await res.arrayBuffer());
+      },
+      { tries: this.maxRetries },
+    );
   }
 }
