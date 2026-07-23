@@ -1,0 +1,31 @@
+{
+  "name": "@bizhou/core",
+  "version": "0.2.14",
+  "description": "敝帚核心库：AES-256-GCM 信封加密、bundle/manifest、分片、百度对接、预览、7z 导出。纯逻辑、无交互、只发进度事件。",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsup",
+    "prepublishOnly": "tsup",
+    "test": "bun test"
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  },
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  }
+}

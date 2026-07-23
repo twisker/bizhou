@@ -1,0 +1,23 @@
+{
+  "name": "bizhou-monorepo",
+  "version": "0.2.14",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.5.2",
+  "description": "敝帚（Bìzhǒu）— 客户端加密引擎 + CLI，monorepo 根",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc -p packages/core/tsconfig.json --noEmit && tsc -p packages/cli/tsconfig.json --noEmit",
+    "build": "pnpm --filter @bizhou/core build && pnpm --filter @bizhou/cli build",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.5",
+    "@types/bun": "latest",
+    "@types/node": "^22",
+    "tsup": "^8.5.1",
+    "typescript": "^5.6.0"
+  },
+  "license": "Apache-2.0"
+}
