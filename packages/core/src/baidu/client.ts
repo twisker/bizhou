@@ -266,6 +266,11 @@ export class BaiduClient {
     );
   }
 
+  /** 创建目录（xpan create isdir=1，等价 mkdir -p）。 */
+  async mkdir(path: string): Promise<void> {
+    await this.fileApi("create", {}, form({ path, isdir: "1", rtype: "3" }));
+  }
+
   /** 通过 dlink 下载文件字节（瞬时失败重试）。 */
   async download(dlink: string): Promise<Buffer> {
     const sep = dlink.includes("?") ? "&" : "?";

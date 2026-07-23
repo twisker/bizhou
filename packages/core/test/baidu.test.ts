@@ -264,3 +264,33 @@ describe("BaiduBundleStore 端到端（模拟网盘 + 真实加密管线）", ()
     }
   });
 });
+
+describe("mkdir + BaiduBundleStore cloudDir", () => {
+  test("mkdir 走 create isdir=1，路径正确", async () => {
+    let seenBody = "";
+    const http: HttpClient = async (url, init) => {
+      expect(url).toContain("method=create");
+      seenBody = String(init?.body);
+      return jsonRes({ errno: 0 });
+    };
+    await new BaiduClient(CONFIG, "AT", http).mkdir("/apps/bizhou/工作/2026");
+    expect(decodeURIComponent(seenBody)).toContain("path=/apps/bizhou/工作/2026");
+    expect(decodeURIComponent(seenBody)).toContain("isdir=1");
+  });
+
+  test("BaiduBundleStore 带 cloudDir 时 chunk 路径含子目录", async () => {
+    const seen: string[] = [];
+    const http: HttpClient = async (url, init) => {
+      if (url.includes("precreate")) {
+        seen.push(decodeURIComponent(String(init?.body).match(/path=([^&]+)/)![1]!));
+        return jsonRes({ errno: 0, uploadid: "UP", block_list: [0] });
+      }
+      if (url.includes("superfile2")) return jsonRes({ md5: "m" });
+      if (url.includes("create")) return jsonRes({ errno: 0, fs_id: 1 });
+      throw new Error("unexpected");
+    };
+    const store = new BaiduBundleStore(new BaiduClient(CONFIG, "AT", http), "abcd", "/工作");
+    await store.putChunk(0, Buffer.from("x"));
+    expect(seen[0]).toBe("/apps/bizhou/工作/abcd.bz/000.part");
+  });
+});

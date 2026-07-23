@@ -10,6 +10,7 @@ import {
   MANIFEST_FILENAME,
   PREVIEW_FILENAME,
 } from "../bundle/index.ts";
+import { joinCloudPath } from "../cloudpath/index.ts";
 import { BizhouError } from "../errors.ts";
 import type { BundleStore } from "../store/index.ts";
 import { APP_ROOT, type BaiduClient } from "./client.ts";
@@ -22,9 +23,11 @@ export class BaiduBundleStore implements BundleStore {
   constructor(
     private readonly client: BaiduClient,
     bundleId: string,
+    cloudDir = "",
   ) {
     this.bundleId = bundleId;
-    this.dir = `${APP_ROOT}/${bundleDirName(bundleId)}`;
+    // /apps/bizhou + <cloudDir> + /<id>.bz
+    this.dir = `${APP_ROOT}${joinCloudPath("/", cloudDir, bundleDirName(bundleId))}`;
   }
 
   private remotePath(filename: string): string {
