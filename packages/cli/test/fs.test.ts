@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash, randomBytes } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -61,25 +61,52 @@ describe("mkdir + ls（本地后端）", () => {
   });
 
   test("子目录 bundle 可按完整 id / 12 位前缀 pull/info/rm", async () => {
-    const rt = createRuntime();
+    // --out 是相对文件根的子目录（pull 落地始终在 rt.fileRoot 之下），先设好文件根再建 rt
+    const fileRoot = join(work, "froot-sub");
+    process.env.BIZHOU_FILE_ROOT = fileRoot;
+    try {
+      const rt = createRuntime();
 
-    const data = randomBytes(8192);
-    const f = join(work, "深藏.bin");
-    await writeFile(f, data);
-    const id = await cmdPush(rt, f, {
-      local: store,
-      to: "/工作/2026",
-      name: "深藏.bin",
-    });
-    expect(id).toMatch(/^[0-9a-f]{32}$/);
+      const data = randomBytes(8192);
+      const f = join(work, "深藏.bin");
+      await writeFile(f, data);
+      const id = await cmdPush(rt, f, {
+        local: store,
+        to: "/工作/2026",
+        name: "深藏.bin",
+      });
+      expect(id).toMatch(/^[0-9a-f]{32}$/);
 
-    const outDir = join(work, "out-sub");
-    await cmdPull(rt, id, { local: store, out: outDir }); // 完整 id 取子目录 bundle
-    const restored = await readFile(join(outDir, "深藏.bin"));
-    expect(sha256(restored)).toBe(sha256(data));
+      await cmdPull(rt, id, { local: store, out: "out-sub" }); // 完整 id 取子目录 bundle
+      const restored = await readFile(join(fileRoot, "out-sub", "深藏.bin"));
+      expect(sha256(restored)).toBe(sha256(data));
 
-    await cmdInfo(rt, id.slice(0, 12), { local: store }); // 12 位前缀跨子目录解析，不应抛错
+      await cmdInfo(rt, id.slice(0, 12), { local: store }); // 12 位前缀跨子目录解析，不应抛错
 
-    await cmdRm(rt, id.slice(0, 12), { local: store }); // 前缀删除成功
+      await cmdRm(rt, id.slice(0, 12), { local: store }); // 前缀删除成功
+    } finally {
+      delete process.env.BIZHOU_FILE_ROOT;
+    }
   });
+});
+
+test("push 缺省云端目录按文件根镜像；pull 落文件根带入结构", async () => {
+  const fr = join(work, "fileroot");
+  await mkdir(join(fr, "工作", "2026"), { recursive: true });
+  process.env.BIZHOU_FILE_ROOT = fr;
+  try {
+    const rt = createRuntime();
+    const data = randomBytes(3000);
+    const src = join(fr, "工作", "2026", "报告.bin");
+    await writeFile(src, data);
+    // 不给 --to：应镜像到 /工作/2026
+    const id = await cmdPush(rt, src, { local: store, name: "报告.bin" });
+    // 该 bundle 应在 /工作/2026 下（用 resolveBundle 间接验证：pull 能取回）
+    await cmdPull(rt, id, { local: store });
+    // pull 落文件根镜像位置
+    const landed = join(fr, "工作", "2026", "报告.bin");
+    expect(sha256(await readFile(landed))).toBe(sha256(data));
+  } finally {
+    delete process.env.BIZHOU_FILE_ROOT;
+  }
 });

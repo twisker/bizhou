@@ -5,7 +5,7 @@
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   BizhouError,
   base32Decode,
@@ -14,7 +14,9 @@ import {
   changePassword,
   createVault,
   DEFAULT_CHUNK_SIZE,
+  defaultUploadCloudDir,
   deriveKey,
+  downloadLocalPath,
   exchangeCodeForToken,
   generateBundleId,
   generateSalt,
@@ -257,9 +259,11 @@ export async function cmdPush(
     : opts.chunk
       ? parseSize(opts.chunk)
       : DEFAULT_CHUNK_SIZE;
-  const cloudDir = normalizeCloudPath(opts.to ?? "/");
+  const cloudDir = opts.to
+    ? normalizeCloudPath(opts.to)
+    : defaultUploadCloudDir(resolve(filePath), rt.fileRoot);
   const backend = await makeBackend(rt, opts.local);
-  if (opts.to) await backend.mkdir(cloudDir); // 目标目录不存在则建
+  if (cloudDir !== "/") await backend.mkdir(cloudDir); // 目标目录不存在则建
   const store = backend.bundleStore(bundleId, cloudDir);
 
   let preview: { kind: "video" | "audio" | "image"; data: Buffer } | undefined;
@@ -304,7 +308,9 @@ export async function cmdPull(
   const backend = await makeBackend(rt, opts.local);
   const store = backend.bundleStore(fullId, dir);
   const { meta } = await readResourceMeta(mk, store);
-  const outPath = join(opts.out ?? ".", meta.name);
+  const outPath = opts.out
+    ? join(rt.fileRoot, opts.out, meta.name)
+    : downloadLocalPath(rt.fileRoot, dir, meta.name);
   await mkdir(dirname(outPath), { recursive: true });
   info(`下载还原：${fullId} → ${outPath}（${formatBytes(meta.size)}）`);
   const res = await unpackResource({
