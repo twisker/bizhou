@@ -59,6 +59,8 @@ export interface Runtime {
   readonly accounts: AccountManager;
   readonly http: HttpClient;
   readonly fileRoot: string;
+  /** 分片上传默认并发度（config.json `uploadConcurrency` 覆盖，clamp[1,16]，缺省 4）。 */
+  readonly uploadConcurrency: number;
   now(): number;
   oauthConfig(): OAuthConfig;
   loadVault(): Promise<VaultFile>;
@@ -77,21 +79,28 @@ export function createRuntime(): Runtime {
   const secrets = new FileSecretStore(paths.dir, paths.secrets, paths.deviceKey);
   const accounts = new AccountManager(secrets);
 
-  // 读 config.json 里的 fileRoot（若有）
+  // 读 config.json 里的 fileRoot / uploadConcurrency（若有）
   let configFileRoot: string | undefined;
+  let configUploadConcurrency: number | undefined;
   try {
-    const cfg = JSON.parse(readFileSync(paths.config, "utf8")) as { fileRoot?: string };
+    const cfg = JSON.parse(readFileSync(paths.config, "utf8")) as {
+      fileRoot?: string;
+      uploadConcurrency?: number;
+    };
     configFileRoot = cfg.fileRoot;
+    configUploadConcurrency = cfg.uploadConcurrency;
   } catch {
     /* 无 config.json，忽略 */
   }
   const fileRoot = resolveFileRoot(process.env, process.platform, configFileRoot);
+  const uploadConcurrency = Math.min(16, Math.max(1, configUploadConcurrency ?? 4));
 
   return {
     paths,
     accounts,
     http: httpAdapter,
     fileRoot,
+    uploadConcurrency,
     now: () => Date.now(),
     oauthConfig(): OAuthConfig {
       const appKey = process.env.BAIDU_APP_KEY;
@@ -124,8 +133,12 @@ export function createRuntime(): Runtime {
   };
 }
 
-/** 为当前账号构建 Baidu 客户端（token 临近过期时用 refresh_token 自动刷新）。 */
-export async function baiduClientForCurrent(rt: Runtime): Promise<BaiduClient> {
+/** 为当前账号构建 Baidu 客户端（token 临近过期时用 refresh_token 自动刷新）。
+ * `concurrency` 覆盖分片上传并发度；缺省用 `rt.uploadConcurrency`。 */
+export async function baiduClientForCurrent(
+  rt: Runtime,
+  concurrency?: number,
+): Promise<BaiduClient> {
   const cur = await rt.accounts.getCurrent();
   if (!cur) {
     throw new VaultError("尚未登录任何账号：请先 `bz login`");
@@ -142,11 +155,17 @@ export async function baiduClientForCurrent(rt: Runtime): Promise<BaiduClient> {
     };
     await rt.accounts.updateTokens(cur.name, tokens);
   }
-  return new BaiduClient(rt.oauthConfig(), tokens.accessToken, rt.http);
+  return new BaiduClient(rt.oauthConfig(), tokens.accessToken, rt.http, {
+    uploadConcurrency: concurrency ?? rt.uploadConcurrency,
+  });
 }
 
-/** 按 --local 选后端：本地目录 or 百度。 */
-export async function makeBackend(rt: Runtime, localDir: string | undefined): Promise<Backend> {
+/** 按 --local 选后端：本地目录 or 百度。`concurrency` 透传给百度分片上传并发度。 */
+export async function makeBackend(
+  rt: Runtime,
+  localDir: string | undefined,
+  concurrency?: number,
+): Promise<Backend> {
   if (localDir) return new LocalBackend(localDir);
-  return new BaiduBackend(await baiduClientForCurrent(rt));
+  return new BaiduBackend(await baiduClientForCurrent(rt, concurrency));
 }
