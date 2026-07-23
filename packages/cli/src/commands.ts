@@ -286,6 +286,7 @@ export async function cmdPush(
   });
   endProgress();
   ok(`已上传。资源 ID：${c.bold(bundleId)}`);
+  out(bundleId); // 完整 ID 输出到 stdout，便于脚本捕获（stderr 走进度/提示）
   return bundleId;
 }
 
@@ -295,6 +296,7 @@ export async function cmdPull(
   opts: CommonOpts & { out?: string },
 ): Promise<void> {
   const mk = await rt.resolveMk(opts);
+  id = await resolveId(rt, id, opts.local);
   const store = await makeStore(rt, id, opts.local);
   const { meta } = await readResourceMeta(mk, store);
   const outPath = join(opts.out ?? ".", meta.name);
@@ -327,6 +329,21 @@ async function listBundleIds(rt: Runtime, local: string | undefined): Promise<st
     .map((e) => e.filename.slice(0, -3));
 }
 
+/** 把用户给的 ID（可为 `bz ls` 显示的 12 位前缀）解析为完整 32 位 bundleId。 */
+async function resolveId(rt: Runtime, id: string, local: string | undefined): Promise<string> {
+  if (/^[0-9a-f]{32}$/.test(id)) return id; // 已是完整 ID
+  const ids = await listBundleIds(rt, local);
+  const matches = ids.filter((b) => b.startsWith(id.toLowerCase()));
+  if (matches.length === 0) throw new BizhouError("INVALID_ARG", `找不到资源：${id}`);
+  if (matches.length > 1) {
+    throw new BizhouError(
+      "INVALID_ARG",
+      `ID 前缀 ${id} 不唯一（匹配 ${matches.length} 个），请给更长前缀`,
+    );
+  }
+  return matches[0]!;
+}
+
 export async function cmdLs(rt: Runtime, opts: CommonOpts): Promise<void> {
   const mk = await rt.resolveMk(opts);
   const ids = await listBundleIds(rt, opts.local);
@@ -347,6 +364,7 @@ export async function cmdLs(rt: Runtime, opts: CommonOpts): Promise<void> {
 
 export async function cmdInfo(rt: Runtime, id: string, opts: CommonOpts): Promise<void> {
   const mk = await rt.resolveMk(opts);
+  id = await resolveId(rt, id, opts.local);
   const store = await makeStore(rt, id, opts.local);
   const { manifest, meta } = await readResourceMeta(mk, store);
   out(`资源 ID   : ${manifest.bundleId}`);
@@ -360,6 +378,7 @@ export async function cmdInfo(rt: Runtime, id: string, opts: CommonOpts): Promis
 }
 
 export async function cmdRm(rt: Runtime, id: string, opts: CommonOpts): Promise<void> {
+  id = await resolveId(rt, id, opts.local);
   const store = await makeStore(rt, id, opts.local);
   await store.remove();
   ok(`已删除资源 ${id}`);
@@ -377,6 +396,7 @@ export async function cmdShare(
   }
   // 默认 --code：导出该资源 DEK 作为分享码。
   const mk = await rt.resolveMk(opts);
+  id = await resolveId(rt, id, opts.local);
   const store = await makeStore(rt, id, opts.local);
   const manifest = parseManifest(await store.getManifest());
   const dek = unwrapDek(mk, manifest.wrappedKey);
@@ -400,6 +420,7 @@ async function cmdShare7z(
     );
   }
   const mk = await rt.resolveMk(opts);
+  id = await resolveId(rt, id, opts.local);
   const store = await makeStore(rt, id, opts.local);
   const { meta } = await readResourceMeta(mk, store);
   const work = await mkdtemp(join(tmpdir(), "bizhou-7z-"));
@@ -423,6 +444,7 @@ export async function cmdPreview(
   opts: CommonOpts & { out?: string },
 ): Promise<void> {
   const mk = await rt.resolveMk(opts);
+  id = await resolveId(rt, id, opts.local);
   const store = await makeStore(rt, id, opts.local);
   const { kind, data } = await openPreview(mk, store);
   const ext = kind === "audio" ? "mp3" : "jpg";
