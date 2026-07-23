@@ -15,6 +15,7 @@ export * from "./crypto/base32.ts";
 export * from "./crypto/index.ts";
 export * from "./errors.ts";
 export * from "./events/index.ts";
+export * from "./journal/index.ts";
 export * from "./keystore/index.ts";
 export * from "./resource/index.ts";
 export * from "./store/index.ts";
