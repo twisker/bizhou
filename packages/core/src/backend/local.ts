@@ -1,7 +1,7 @@
 import { cp, mkdir, readdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { BUNDLE_SUFFIX } from "../bundle/index.ts";
-import { cloudBasename, normalizeCloudPath } from "../cloudpath/index.ts";
+import { assertNameSegment, cloudBasename, normalizeCloudPath } from "../cloudpath/index.ts";
 import { LocalBundleStore } from "../store/index.ts";
 import type { Backend, DirListing } from "./index.ts";
 
@@ -56,6 +56,7 @@ export class LocalBackend implements Backend {
   }
 
   async rename(srcCloudPath: string, newName: string): Promise<void> {
+    assertNameSegment(newName);
     const absSrc = this.abs(srcCloudPath);
     await rename(absSrc, join(dirname(absSrc), newName));
   }

@@ -1,7 +1,7 @@
 import { APP_ROOT, type BaiduClient } from "../baidu/client.ts";
 import { BaiduBundleStore } from "../baidu/store.ts";
 import { BUNDLE_SUFFIX } from "../bundle/index.ts";
-import { normalizeCloudPath } from "../cloudpath/index.ts";
+import { assertNameSegment, normalizeCloudPath } from "../cloudpath/index.ts";
 import type { Backend, DirListing } from "./index.ts";
 
 /** 百度后端：真实目录建在 /apps/bizhou 下。 */
@@ -46,6 +46,7 @@ export class BaiduBackend implements Backend {
   }
 
   async rename(srcCloudPath: string, newName: string): Promise<void> {
+    assertNameSegment(newName);
     await this.client.rename(this.remote(srcCloudPath), newName);
   }
 }

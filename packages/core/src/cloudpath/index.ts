@@ -40,6 +40,13 @@ export function splitCloudPath(p: string): { dir: string; base: string } {
   return { dir: cloudDirname(p), base: cloudBasename(p) };
 }
 
+/** 校验一个"名字段"是合法单段文件名（拒绝含分隔符 / \ 或 . / .. / 空，防重命名穿越）。 */
+export function assertNameSegment(name: string): void {
+  if (name === "" || name === "." || name === ".." || /[/\\]/.test(name)) {
+    throw new InvalidArgError(`非法名称（须为单段文件名，不含路径分隔符/..）：${name}`);
+  }
+}
+
 /**
  * 上传缺省云端目录：让 sourceAbs 落到相对文件根的镜像位置。
  * 取 sourceAbs 的父目录相对 fileRoot 的路径；在文件根外则回云端根 "/"。

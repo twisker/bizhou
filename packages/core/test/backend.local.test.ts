@@ -83,4 +83,11 @@ describe("LocalBackend move/copy/rename（目录级）", () => {
     expect(await exists(join(base2, "b", "a2", "x.bz", "manifest.json"))).toBe(true);
     expect(await exists(join(base2, "b", "a"))).toBe(false);
   });
+
+  test("rename: newName 含路径穿越段应拒绝，不得逃逸 baseDir", async () => {
+    const be = new LocalBackend(base2);
+    await be.mkdir("/some");
+
+    await expect(be.rename("/some", "../escape")).rejects.toThrow();
+  });
 });
