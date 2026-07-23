@@ -130,4 +130,5 @@
 
 ## Phase 3 — 打磨与生态（远期，待细化）
 
-> 候选：shell 补全、更多预览类型、daemon/定时备份、GUI 前端接入核心库、进 homebrew-core / winget、worker_threads 并行加密、移动端（远期）。
+> **范围：本项目只做 CLI 相关（不做 GUI 前端、不做移动端）。**
+> 候选：shell 补全、更多预览类型、daemon/定时备份、进 homebrew-core / winget、worker_threads 并行加密。
