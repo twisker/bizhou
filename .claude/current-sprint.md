@@ -8,29 +8,29 @@
 
 ---
 
-## 当前 Sprint：v2 云端文件系统层（Phase 2 ✅ 完成；Phase 3/4 进行中）
+## 当前状态：Sprint 间歇（v2 云端文件系统层全部完成并归档）
 
 **最后更新：** 2026-07-23
-**当前目标：** 连续完成 v2-Phase 2/3/4（目标驱动）。执行方式：每阶段 写计划 → 子代理驱动（实现+评审）→ 收尾。
 
 ### 已完成里程碑（均归档于 `.claude/archive/`）
-- **M0 + M1**：真机通过、功能全绿 → `sprint-0-m0-m1.md`
-- **v2-Phase 1**：双本地根 + 目录树基础 + 递归 bundle 解析 → `v2-phase1-cloud-fs.md`
-- **v2-Phase 2**：上传/下载映射（缺省镜像 + pull 落文件根）+ `push -r`/`pull -r` 整树加密备份还原（105 测试全绿）
-
-### 进行中 / 待办
-| 事项 | 责任人 | 状态 |
-|------|--------|------|
-| v2-Phase 3（mv/cp/rename） | AI | 进行中 |
-| v2-Phase 4（回收站，含开放 API 联网验证） | AI | 待启动 |
-| git flow 合并 + 发版 | 人工 | 待办（`docs/release/发布准备指南.md`） |
+- **M0 + M1**（加密引擎 + CLI）：真机通过、功能全绿 → `sprint-0-m0-m1.md`
+- **v2-Phase 1**（双本地根 + 目录树基础 + 递归解析）→ `v2-phase1-cloud-fs.md`
+- **v2 Phase 1–4 整体**（目录树 / 映射 / 整树备份 / mv-cp-rename / 回收站）→ `v2-cloud-fs.md`
 
 ### 代码状态
-- 分支 `feature/init_proj`（工作树干净）；`bun test` 105 全绿 + 1 skip；typecheck / lint / build 全过。
+- 分支 `feature/init_proj`（工作树干净）；`bun test` **131 全绿 + 1 skip**；typecheck / lint / build（3 产物）全过。
+- 由人工按 git flow 合并（`feature/init_proj → dev`）与发版。
+
+### 下一步（待人工触发）
+| 事项 | 责任人 | 状态 |
+|------|--------|------|
+| git flow 合并 + 发版（`dev→main` tag + npm/tap/bucket，见 `docs/release/发布准备指南.md`） | 人工 | 待办 |
+| H-08 百度回收站管理接口联网验证 | 人工 | 待验证 |
+| Phase 3 打磨（shell 补全、更多预览、daemon/定时备份、worker_threads 并行、进 homebrew-core/winget） | AI（需人工示意） | 远期待细化 |
 
 ### 各模块状态
 
-> 全部稳定，详见 `.claude/module-spec-registry.md`。v2-Phase 1 新增 `config`(双根)/`cloudpath`/`backend`(Local/Baidu) 均已稳定。
+> 全部稳定，详见 `.claude/module-spec-registry.md`。v2 新增 config(双根)/cloudpath/backend(含 move/copy/rename/回收站) 均稳定。
 
 ### 活跃文件清单
 
@@ -40,5 +40,4 @@
 
 | 时间 | 改动目的 | 涉及 |
 |------|---------|------|
-| 2026-07-23 | v2-Phase 1 全部完成（config 双根/cloudpath/backend/mkdir/ls -r/push --to）+ 递归 bundle 解析（Phase 2 前移）+ 路径穿越修复 | `packages/core/src/{config,cloudpath,backend,baidu}`、`packages/cli/src/{runtime,commands,index}` |
-| 2026-07-23 | 统一版本脚本 bump-version.sh + 幂等 publish-buckets.sh + 发布准备指南 | `scripts/`、`.githooks/`、`docs/release/` |
+| 2026-07-23 | v2 云端 FS 层 Phase 1–4 全部完成（目录树/映射/整树备份/mv-cp-rename/回收站）；多处路径穿越与分派安全修复 | `packages/core/src/{config,cloudpath,backend,baidu,resource}`、`packages/cli/src/{runtime,commands,index}` |

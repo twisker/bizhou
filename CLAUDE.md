@@ -8,7 +8,7 @@
 
 - 项目代号：`bizhou`（CLI 命令 `bz`）
 - 版本：见根 `VERSION`（当前 0.2.x；每次 commit 由 `scripts/bump-version.sh` 自动同步 VERSION + 所有 package.json 的 patch）
-- 当前阶段：**M0 + M1 已完成**、**v2 云端 FS 层 Phase 1 已完成**（96 测试全绿，opus 整分支评审 Ready to merge）；下一步 **v2-Phase 2**（整树备份/还原）待人工示意开工（见 `.claude/current-sprint.md`）
+- 当前阶段：**M0 + M1 + v2 云端 FS 层（Phase 1–4）全部完成**（131 测试全绿）；待人工按 git flow 合并/发版。命令全集见 `.claude/module-spec-registry.md`（见 `.claude/current-sprint.md`）
 - 技术栈：TypeScript + Bun（兼容 Node LTS）· pnpm monorepo（`@bizhou/core` + `bz`）· 授权 Apache-2.0
 
 ## 核心文档索引

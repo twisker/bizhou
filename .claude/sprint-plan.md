@@ -139,8 +139,16 @@
 
 **验收：** `bun test` 122 全绿 + 1 skip；typecheck/lint/build 全过；修复 2 处 Important（rename 穿越、分派吞错）。
 
-### v2-Phase 4 — 回收站
-> `rm`→百度原生回收站（`-r`/`--yes`）；`trash list/restore/rm/clear`（原生，开放 API 不支持则提示去百度 App）；联网验证回收站 API 支持度。
+### v2-Phase 4 — 回收站 ✅ **完成（2026-07-23）**
+> 计划：`docs/superpowers/plans/2026-07-23-cloud-fs-phase4-recycle-bin.md`
+
+| 任务 | 说明 | 状态 |
+|-----|------|------|
+| T1 | Backend 回收站：LocalBackend `.trash/`（完整可测）+ BaiduBackend 原生删除/管理提示去 App | ✅ |
+| T2 | `bz rm`→回收站（目录需 `--yes`）+ `bz trash [list/restore/rm/clear]` | ✅ |
+
+**验收：** `bun test` 131 全绿 + 1 skip；typecheck/lint/build 全过；修复 rename 穿越/分派吞错等（见各阶段）。
+**⚠ 待联网验证（人工 H-08）：** 百度开放平台**回收站管理接口**是否可用——当前 `bz trash *` 对百度后端抛"请到百度 App 操作"兜底；若开放 API 实际支持，可后续接入。删除进原生回收站本身可用（filemanager delete）。
 
 ---
 
