@@ -152,7 +152,37 @@
 
 ---
 
-## Phase 3 — 打磨与生态（远期，待细化）
+## Phase 3 — 打磨与生态
 
 > **范围：本项目只做 CLI 相关（不做 GUI 前端、不做移动端）。**
-> 候选：shell 补全、更多预览类型、daemon/定时备份、进 homebrew-core / winget、worker_threads 并行加密。
+> 候选池：shell 补全、更多预览类型、daemon/定时备份、进 homebrew-core / winget、worker_threads 并行加密。
+> **子项各自 spec→plan→执行。已澄清并定型的子项在下方按 Sprint 拆分。**
+
+### Phase 3 · S1 — 健壮上传（并发 + 续传 + 幂等） 🚧 **进行中**
+
+> 设计：`docs/superpowers/specs/2026-07-23-robust-upload-download-design.md`
+> 计划：`docs/superpowers/plans/2026-07-23-robust-upload-s1.md`（含各任务完整 TDD 步骤与代码）
+> 来源：候选「worker_threads 并行加密/上传」经澄清——真正杠杆是**上传并发（async I/O，不引 worker_threads）**，并顺带补齐续传接线与内容级幂等。
+
+**目标：** `bz push` 具备片内 4MB 并发上传、中断续传、内容级幂等（去重跳过 + 在飞锁），manifest 本地缓存消除去重扫描的重复网络拉取。
+
+**执行方式：** 子代理驱动开发（每任务 实现子代理 TDD + 评审子代理），完成后整分支评审，交人工按 git flow 合并。
+
+| 任务 | 说明 | 责任人 | 状态 |
+|-----|------|--------|------|
+| S1-T1 | `contentId` 内容身份底座：HKDF(MK) 派生 + HMAC(明文)，存加密 encMeta；`ResourceMeta`/`PackOptions` 接线；`info` 显示 | AI | ⬜ 待开始 |
+| S1-T2 | `uploadPart` 4MB 分片限流池并发（默认 4，clamp[1,16]）+ AbortController fail-fast；`withRetry`/`uploadSlice` 支持 signal | AI | ⬜ 待开始 |
+| S1-T3 | 上传日志模块（`journal/`）：一份 JSON 兼作 在飞锁 + 续传状态；核心不读时钟（now/pid 注入） | AI | ⬜ 待开始 |
+| S1-T4 | manifest 缓存模块（`cache/`，只存加密态）+ `rename`/`rm`/`trash` 失效钩子 | AI | ⬜ 待开始 |
+| S1-T5 | `cmdPush` 集成：预哈希→去重（走缓存）→锁/续传→`--force`/`--concurrency`→消息；抽出共用 `pushOneFile` | AI | ⬜ 待开始 |
+| S1-T6 | `push -r` 递归复用 `pushOneFile`，整树去重/续传/锁一致 | AI | ⬜ 待开始 |
+
+**验收：** 新增 content/journal/cache 三模块单测 + push 幂等/续传/锁集成测试全绿；`bun test` 全量无回归；typecheck/lint/build 全过；安全红线（contentId 仅入加密 encMeta、日志/缓存无密钥、缓存键防穿越、GCM 失败即抛）自检通过。
+
+### Phase 3 · S2 — 健壮下载（幂等 + 续传） 📋 **已规划，待 S1 后**
+
+> 复用 S1 的 `contentId` 底座。范围：pull 前目标已存在且 hash==contentId→跳过；下载在飞锁；临时文件 + 原子改名 + **分片断点续传**；GCM 校验失败即抛不写出。spec 已含 S2 概要，待 S1 完成后单独出 plan。
+
+### Phase 3 · 其余候选（待细化）
+
+> shell 补全、更多预览类型、daemon/定时备份、进 homebrew-core / winget、worker_threads 并行加密（网络场景零收益，仅 gzip/纯本地备份时再评估）。各自 spec→plan→执行。
