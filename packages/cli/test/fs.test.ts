@@ -111,6 +111,36 @@ test("push 缺省云端目录按文件根镜像；pull 落文件根带入结构"
   }
 });
 
+test("push -r 递归上传目录树，pull -r 还原字节级一致", async () => {
+  const fr = join(work, "fr2");
+  process.env.BIZHOU_FILE_ROOT = fr;
+  try {
+    const rt = createRuntime();
+    const treeDir = join(work, "tree");
+    await mkdir(join(treeDir, "a", "b"), { recursive: true });
+    const f1 = randomBytes(1000);
+    const f2 = randomBytes(2000);
+    await writeFile(join(treeDir, "root.bin"), f1);
+    await writeFile(join(treeDir, "a", "b", "deep.bin"), f2);
+    await cmdPush(rt, treeDir, { local: store, recursive: true, to: "/备份" });
+    // pull -r 还原整棵树到文件根
+    await cmdPull(rt, "/备份/tree", { local: store, recursive: true });
+    expect(sha256(await readFile(join(fr, "备份", "tree", "root.bin")))).toBe(sha256(f1));
+    expect(sha256(await readFile(join(fr, "备份", "tree", "a", "b", "deep.bin")))).toBe(
+      sha256(f2),
+    );
+  } finally {
+    delete process.env.BIZHOU_FILE_ROOT;
+  }
+});
+
+test("push -r 对非目录报错", async () => {
+  const f = join(work, "not-a-dir.bin");
+  await writeFile(f, Buffer.from("x"));
+  const rt = createRuntime();
+  await expect(cmdPush(rt, f, { local: store, recursive: true })).rejects.toThrow();
+});
+
 test("pull --out 也净化恶意 meta.name，防 ../ 逃逸文件根", async () => {
   const fr = join(work, "fr-sec");
   process.env.BIZHOU_FILE_ROOT = fr;

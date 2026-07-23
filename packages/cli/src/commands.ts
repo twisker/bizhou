@@ -2,11 +2,12 @@
  * bz 各命令实现。命令只做"编排 + 交互 + 渲染"，加密/分片/对接全在 @bizhou/core。
  */
 
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
+  type Backend,
   BizhouError,
   base32Decode,
   base32Encode,
@@ -21,6 +22,7 @@ import {
   generateBundleId,
   generateSalt,
   groupBase32,
+  joinCloudPath,
   normalizeCloudPath,
   openPreview,
   packResource,
@@ -248,9 +250,14 @@ export async function cmdPush(
     name?: string;
     preview?: boolean;
     to?: string;
+    recursive?: boolean;
   },
 ): Promise<string> {
   const st = await stat(filePath);
+  if (opts.recursive) {
+    if (!st.isDirectory()) throw new BizhouError("INVALID_ARG", `-r 需要目录：${filePath}`);
+    return cmdPushRecursive(rt, filePath, opts);
+  }
   if (!st.isFile()) throw new BizhouError("INVALID_ARG", `不是文件：${filePath}`);
   const mk = await rt.resolveMk(opts);
   const bundleId = generateBundleId();
@@ -298,14 +305,112 @@ export async function cmdPush(
   return bundleId;
 }
 
+/** 递归收集本地目录下所有文件的绝对路径（子目录深度不限）。 */
+async function walkLocalFiles(absDir: string): Promise<string[]> {
+  const result: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (e.isFile()) result.push(p);
+    }
+  };
+  await walk(absDir);
+  return result;
+}
+
+/** `push -r`：把本地目录树逐文件 packResource 到镜像的云端子目录树下。 */
+async function cmdPushRecursive(
+  rt: Runtime,
+  dirPath: string,
+  opts: CommonOpts & { chunk?: string; compress?: boolean; noSplit?: boolean; to?: string },
+): Promise<string> {
+  const mk = await rt.resolveMk(opts);
+  const absDir = resolve(dirPath);
+  // 目录本身的缺省镜像位置：取"目录当作一个条目"时的父级镜像，再把目录名接回去。
+  const baseCloud = opts.to
+    ? normalizeCloudPath(opts.to)
+    : defaultUploadCloudDir(absDir + sep, rt.fileRoot);
+  const rootCloud = joinCloudPath(baseCloud, basename(absDir));
+  const backend = await makeBackend(rt, opts.local);
+  if (rootCloud !== "/") await backend.mkdir(rootCloud);
+
+  const files = await walkLocalFiles(absDir);
+  if (files.length === 0) {
+    info(`（空目录，无文件可上传）：${absDir}`);
+    return rootCloud;
+  }
+
+  for (const abs of files) {
+    const rel = relative(absDir, abs);
+    const relDir = dirname(rel);
+    const cloudDir = relDir === "." ? rootCloud : joinCloudPath(rootCloud, relDir);
+    if (cloudDir !== "/") await backend.mkdir(cloudDir);
+    const st = await stat(abs);
+    const bundleId = generateBundleId();
+    const chunkSize = opts.noSplit
+      ? Math.max(st.size, 1)
+      : opts.chunk
+        ? parseSize(opts.chunk)
+        : DEFAULT_CHUNK_SIZE;
+    const store = backend.bundleStore(bundleId, cloudDir);
+    info(`加密上传：${abs}（${formatBytes(st.size)}）→ ${cloudDir}/${basename(abs)}`);
+    await packResource({
+      filePath: abs,
+      fileSize: st.size,
+      mk,
+      bundleId,
+      createdAt: new Date().toISOString(),
+      chunkSize,
+      compression: opts.compress ? "gzip" : "none",
+      store,
+      name: basename(abs),
+      mtime: st.mtime.toISOString(),
+      onProgress: (e) => renderProgress("加密", e.bytesDone, e.bytesTotal),
+    });
+    endProgress();
+    ok(`已上传：${rel} → ${bundleId}`);
+  }
+  ok(`整树上传完成，共 ${files.length} 个文件 → ${rootCloud}`);
+  return rootCloud;
+}
+
 export async function cmdPull(
   rt: Runtime,
   id: string,
-  opts: CommonOpts & { out?: string },
+  opts: CommonOpts & { out?: string; recursive?: boolean },
 ): Promise<void> {
   const mk = await rt.resolveMk(opts);
-  const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
   const backend = await makeBackend(rt, opts.local);
+
+  if (opts.recursive) {
+    const startDir = normalizeCloudPath(id);
+    const bundles = await walkBundlesUnder(backend, startDir);
+    if (bundles.length === 0) {
+      info(`（空）云端目录下无资源：${startDir}`);
+      return;
+    }
+    for (const b of bundles) {
+      const store = backend.bundleStore(b.id, b.dir);
+      const { meta } = await readResourceMeta(mk, store);
+      const outPath = downloadLocalPath(rt.fileRoot, b.dir, meta.name);
+      await mkdir(dirname(outPath), { recursive: true });
+      info(`下载还原：${b.id} → ${outPath}（${formatBytes(meta.size)}）`);
+      const res = await unpackResource({
+        mk,
+        store,
+        outPath,
+        onProgress: (e) => renderProgress("解密", e.bytesDone, e.bytesTotal),
+      });
+      endProgress();
+      ok(`已还原 ${formatBytes(res.bytesWritten)} → ${outPath}`);
+    }
+    ok(`整树还原完成，共 ${bundles.length} 个文件 → ${rt.fileRoot}`);
+    return;
+  }
+
+  const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
   const store = backend.bundleStore(fullId, dir);
   const { meta } = await readResourceMeta(mk, store);
   // 两个分支都经 downloadLocalPath（会 normalize 目录段、拒绝 '..'，并 basename 净化 name），
@@ -323,12 +428,11 @@ export async function cmdPull(
   ok(`已还原 ${formatBytes(res.bytesWritten)} → ${outPath}`);
 }
 
-/** 递归列出整棵云端树里所有 bundle 的 `{id, dir}`（从根 `/` 开始）。 */
-async function listBundles(
-  rt: Runtime,
-  local: string | undefined,
+/** 递归列出某云端目录子树下所有 bundle 的 `{id, dir}`。 */
+async function walkBundlesUnder(
+  backend: Backend,
+  startDir: string,
 ): Promise<{ id: string; dir: string }[]> {
-  const backend = await makeBackend(rt, local);
   const result: { id: string; dir: string }[] = [];
   const walk = async (dir: string): Promise<void> => {
     const listing = await backend.listDir(dir);
@@ -337,8 +441,17 @@ async function listBundles(
       await walk(dir === "/" ? `/${d}` : `${dir}/${d}`);
     }
   };
-  await walk("/");
+  await walk(startDir);
   return result;
+}
+
+/** 递归列出整棵云端树里所有 bundle 的 `{id, dir}`（从根 `/` 开始）。 */
+async function listBundles(
+  rt: Runtime,
+  local: string | undefined,
+): Promise<{ id: string; dir: string }[]> {
+  const backend = await makeBackend(rt, local);
+  return walkBundlesUnder(backend, "/");
 }
 
 /** 把用户给的 ID（可为 `bz ls` 显示的 12 位前缀）解析为完整 bundle，递归遍历子目录查找。 */
