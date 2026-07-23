@@ -25,7 +25,7 @@ importers:
         version: 5.9.3
 
   packages/cli:
-    dependencies:
+    devDependencies:
       '@bizhou/core':
         specifier: workspace:*
         version: link:../core

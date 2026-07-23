@@ -17,7 +17,7 @@
       "bz": "./dist/index.js"
     }
   },
-  "dependencies": {
+  "devDependencies": {
     "@bizhou/core": "workspace:*"
   },
   "license": "Apache-2.0",
