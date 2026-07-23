@@ -2,7 +2,7 @@
  * bz 各命令实现。命令只做"编排 + 交互 + 渲染"，加密/分片/对接全在 @bizhou/core。
  */
 
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
@@ -573,10 +573,137 @@ async function cmdPushRecursive(
   return rootCloud;
 }
 
+/** 在飞锁 TTL：同上传，防误判刚启动的并发/长下载。 */
+const DOWNLOAD_LOCK_TTL_MS = 30 * 60 * 1000;
+
+/** 下载日志键：新 bundle 用 contentId，旧 bundle（无 contentId）退回 bundleId。 */
+function downloadJournalKey(contentId: string | undefined, bundleId: string): string {
+  return contentId && contentId.length > 0 ? contentId : bundleId;
+}
+
+async function fileExists(p: string): Promise<boolean> {
+  try {
+    await stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export interface PullOneOpts {
+  force?: boolean;
+}
+
+export interface PullOneResult {
+  status: "restored" | "skipped-dup" | "locked" | "resumed";
+  bytesWritten: number;
+}
+
+/** 单 bundle 下载内核：幂等→锁/续传→解密到 .part→端到端校验→原子改名。cmdPull 与 pull -r 共用。 */
+export async function pullOneBundle(
+  rt: Runtime,
+  backend: Backend,
+  mk: Buffer,
+  contentKey: Buffer,
+  fullId: string,
+  dir: string,
+  outPath: string,
+  opts: PullOneOpts,
+): Promise<PullOneResult> {
+  const store = backend.bundleStore(fullId, dir);
+  const { manifest, meta } = await readResourceMeta(mk, store);
+  const cid = meta.contentId; // 可能 undefined（旧 bundle）
+  const jkey = downloadJournalKey(cid, fullId);
+  const jpath = journalPath(rt.paths.dir, "download", jkey, outPath);
+  const partPath = `${outPath}.part`;
+
+  // 1. 幂等：目标已存在且内容相同 → 跳过（仅当有 contentId 可比对）
+  if (!opts.force && cid && (await fileExists(outPath))) {
+    if ((await hashPlaintextFile(outPath, contentKey)) === cid) {
+      warn(`目标已有相同文件，跳过：${outPath}`);
+      return { status: "skipped-dup", bytesWritten: 0 };
+    }
+  }
+
+  // 2. 查下载日志：锁 or 续传 or 新建
+  const existing = await readJournal(jpath);
+  let skip: number[] = [];
+  let status: "restored" | "resumed" = "restored";
+  if (existing) {
+    const alive = isLockAlive(existing, {
+      ttlMs: DOWNLOAD_LOCK_TTL_MS,
+      now: rt.now(),
+      pidAlive: pidAlive(existing.pid),
+    });
+    if (alive && !opts.force) {
+      warn(`同文件正在下载，本次跳过：${outPath}`);
+      return { status: "locked", bytesWritten: 0 };
+    }
+    // 崩溃残留（或 --force）→ 续传，但仅当 .part 仍在；否则从头
+    if (await fileExists(partPath)) {
+      skip = existing.doneChunks;
+      status = "resumed";
+    }
+  }
+
+  await mkdir(dirname(outPath), { recursive: true });
+
+  // 3. 写日志（上锁）
+  await writeJournal(jpath, {
+    bundleId: fullId,
+    cloudDir: dir,
+    contentId: cid ?? "",
+    doneChunks: skip,
+    totalChunks: manifest.chunks.length,
+    startedAt: new Date(rt.now()).toISOString(),
+    pid: process.pid,
+  });
+
+  // 4. 解密到 .part；每片写完把 seq 追加进日志（串行链，err-on-safe：日志滞后只会重下，绝不跳缺片）
+  let chain: Promise<void> = Promise.resolve();
+  let bytesWritten = 0;
+  try {
+    const res = await unpackResource({
+      mk,
+      store,
+      outPath: partPath,
+      skip,
+      onProgress: (e) => {
+        renderProgress("解密", e.bytesDone, e.bytesTotal);
+        chain = chain.then(() => appendDoneChunk(jpath, e.seq));
+      },
+    });
+    bytesWritten = res.bytesWritten;
+    await chain; // 确保进度落盘日志
+  } catch (err) {
+    endProgress();
+    await chain.catch(() => {});
+    throw err; // .part 与日志保留，供续传
+  }
+  endProgress();
+
+  // 5. 端到端校验（有 contentId 才做）：装配文件必须字节等于上传物
+  if (cid) {
+    const got = await hashPlaintextFile(partPath, contentKey);
+    if (got !== cid) {
+      throw new BizhouError(
+        "CHUNK",
+        `下载文件 contentId 校验失败（数据不完整或损坏），未交付：${outPath}`,
+      );
+      // 注意：不 removeJournal、不 rename → 保留 .part 与日志供重试
+    }
+  }
+
+  // 6. 原子改名落地 + 释放锁
+  await rename(partPath, outPath);
+  await removeJournal(jpath);
+  return { status, bytesWritten };
+}
+
 export async function cmdPull(
   rt: Runtime,
   id: string,
-  opts: CommonOpts & { out?: string; recursive?: boolean },
+  opts: CommonOpts & { out?: string; recursive?: boolean; force?: boolean },
 ): Promise<void> {
   const mk = await rt.resolveMk(opts);
   const backend = await makeBackend(rt, opts.local);
@@ -608,21 +735,17 @@ export async function cmdPull(
   }
 
   const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
-  const store = backend.bundleStore(fullId, dir);
-  const { meta } = await readResourceMeta(mk, store);
+  const { meta } = await readResourceMeta(mk, backend.bundleStore(fullId, dir));
   // 两个分支都经 downloadLocalPath（会 normalize 目录段、拒绝 '..'，并 basename 净化 name），
   // 杜绝 --out 或 meta.name 里的 ../ 逃逸文件根。--out 给定时用它作落点子目录，否则用 bundle 云端目录。
   const outPath = downloadLocalPath(rt.fileRoot, opts.out ?? dir, meta.name);
-  await mkdir(dirname(outPath), { recursive: true });
+  const contentKey = deriveContentKey(mk);
   info(`下载还原：${fullId} → ${outPath}（${formatBytes(meta.size)}）`);
-  const res = await unpackResource({
-    mk,
-    store,
-    outPath,
-    onProgress: (e) => renderProgress("解密", e.bytesDone, e.bytesTotal),
-  });
-  endProgress();
-  ok(`已还原 ${formatBytes(res.bytesWritten)} → ${outPath}`);
+  const r = await pullOneBundle(rt, backend, mk, contentKey, fullId, dir, outPath, opts);
+  if (r.status === "skipped-dup" || r.status === "locked") return;
+  ok(
+    `已还原${r.status === "resumed" ? "（续传）" : ""} ${formatBytes(r.bytesWritten)} → ${outPath}`,
+  );
 }
 
 /** 递归列出某云端目录子树下所有 bundle 的 `{id, dir}`。 */

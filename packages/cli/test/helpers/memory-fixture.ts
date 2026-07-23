@@ -6,7 +6,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import {
@@ -17,18 +17,23 @@ import {
   deriveContentKey,
   generateBundleId,
   generateKey,
+  hashPlaintextBuffer,
   hashPlaintextFile,
   joinCloudPath,
   journalPath,
   MemoryBundleStore,
   normalizeCloudPath,
   packResource,
+  readResourceMeta,
   unpackResource,
   type UnpackResult,
   wrapDek,
   writeJournal,
 } from "@bizhou/core";
 import {
+  type PullOneOpts,
+  type PullOneResult,
+  pullOneBundle,
   type PushOneOpts,
   type PushOneResult,
   pushOneFile,
@@ -43,6 +48,8 @@ const STALE_PID = 2 ** 30;
 class RecordingBundleStore implements BundleStore {
   readonly bundleId: string;
   readonly putChunkCalls: number[] = [];
+  /** 记录每次 getChunk 的 seq，供下载续传测试断言 skip 的 seq 未被重新拉取。 */
+  readonly getChunkCalls: number[] = [];
   private readonly inner: MemoryBundleStore;
 
   constructor(bundleId: string) {
@@ -57,7 +64,8 @@ class RecordingBundleStore implements BundleStore {
   async seedChunk(seq: number, data: Buffer): Promise<void> {
     await this.inner.putChunk(seq, data);
   }
-  getChunk(seq: number): Promise<Buffer> {
+  async getChunk(seq: number): Promise<Buffer> {
+    this.getChunkCalls.push(seq);
     return this.inner.getChunk(seq);
   }
   putManifest(json: string): Promise<void> {
@@ -121,6 +129,11 @@ class MemoryBackend implements Backend {
   /** 供夹具内部直接查某 bundleId 记录的 putChunk 调用（不经 Backend 接口）。 */
   recordedCalls(bundleId: string): number[] {
     return this.byBundleId.get(bundleId)?.store.putChunkCalls ?? [];
+  }
+
+  /** 供夹具内部直接查某 bundleId 记录的 getChunk 调用（供下载续传测试断言 skip 生效）。 */
+  recordedGetChunkCalls(bundleId: string): number[] {
+    return this.byBundleId.get(bundleId)?.store.getChunkCalls ?? [];
   }
 
   /** 跨全部云端目录统计 bundle 总数（供整树幂等测试断言"不新增"）。 */
@@ -333,4 +346,182 @@ export async function makeMemoryFixture(opts: MemoryFixtureOpts = {}): Promise<M
 /** 测试文件结束前清理临时目录（调用方负责，此处仅导出以备直接使用）。 */
 export async function cleanupMemoryFixture(fx: MemoryFixture): Promise<void> {
   await rm(fx.tmp, { recursive: true, force: true });
+}
+
+// ---------------------------------------------------------------------------
+// pull-idempotency 测试用内存夹具：复用上面的 MemoryBackend/RecordingBundleStore，
+// 驱动 `pullOneBundle`（幂等/在飞锁/续传/端到端校验/原子落地）。
+// ---------------------------------------------------------------------------
+
+/** 固定云端目录，供本夹具内所有 bundle 使用（strictListDir 关闭，无需先 mkdir）。 */
+const PULL_FIXTURE_DIR = "/pull-fixture";
+
+export interface PullFixture {
+  /** 临时目录：既充当落地文件的父目录，也充当 rt.paths.dir（下载日志根）。 */
+  readonly tmp: string;
+  readonly mk: Buffer;
+  /** 用 packResource 造一个内存 bundle（含 contentId），返回其 `{fullId, dir}`。 */
+  packBundle(data: Buffer, opts?: { chunkSize?: number }): Promise<{ fullId: string; dir: string }>;
+  /** 驱动被测的 `pullOneBundle`。 */
+  pullOne(
+    fullId: string,
+    dir: string,
+    outPath: string,
+    opts: PullOneOpts,
+  ): Promise<PullOneResult>;
+  /** 预置一份"存活"下载日志（startedAt=now, pid=当前进程），模拟并发/在飞下载。 */
+  writeLiveDownloadLock(fullId: string, dir: string, outPath: string): Promise<void>;
+  /**
+   * 预置崩溃残留：`.part` 已含 `doneChunks` 对应的真实明文前缀（取自 `data`），
+   * 并写一份陈旧下载日志（已死 pid + 久远 startedAt）。返回可查询 getChunk 调用记录的句柄。
+   */
+  seedResume(
+    fullId: string,
+    dir: string,
+    outPath: string,
+    data: Buffer,
+    opts: { chunkSize: number; doneChunks: number[] },
+  ): Promise<{ getChunkCalls: number[] }>;
+  /**
+   * 同 seedResume，但 `.part` 中 doneChunks 对应的明文被篡改（与真实内容不符），
+   * 用于触发端到端 contentId 校验失败。
+   */
+  seedResumeCorrupt(
+    fullId: string,
+    dir: string,
+    outPath: string,
+    opts: { chunkSize: number; doneChunks: number[] },
+  ): Promise<void>;
+  exists(path: string): Promise<boolean>;
+}
+
+/** 下载日志键：与 commands.ts 内 `downloadJournalKey` 同一逻辑（新 bundle 用 contentId，旧 bundle 退回 bundleId）。 */
+function pullJournalKey(contentId: string | undefined, bundleId: string): string {
+  return contentId && contentId.length > 0 ? contentId : bundleId;
+}
+
+export async function makePullFixture(): Promise<PullFixture> {
+  const tmp = await mkdtemp(join(tmpdir(), "bizhou-pull-fixture-"));
+  const mk = randomBytes(32);
+  const contentKey = deriveContentKey(mk);
+  const backend = new MemoryBackend(false);
+
+  const rt: Runtime = {
+    paths: { dir: tmp, vault: "", secrets: "", deviceKey: "", config: "" },
+    accounts: undefined as unknown as Runtime["accounts"], // pullOneBundle 不使用 rt.accounts
+    http: undefined as unknown as Runtime["http"], // pullOneBundle 不使用 rt.http
+    fileRoot: tmp,
+    uploadConcurrency: 4,
+    now: () => Date.now(),
+    oauthConfig: () => {
+      throw new BizhouError("IO", "内存夹具不支持 oauthConfig");
+    },
+    loadVault: () => {
+      throw new BizhouError("IO", "内存夹具不支持 loadVault");
+    },
+    vaultExists: () => false,
+    saveVault: () => {
+      throw new BizhouError("IO", "内存夹具不支持 saveVault");
+    },
+    resolveMk: async () => mk,
+  };
+
+  return {
+    tmp,
+    mk,
+    async packBundle(data, opts = {}) {
+      const fullId = generateBundleId();
+      const dir = PULL_FIXTURE_DIR;
+      const srcPath = join(tmp, `${fullId}-src.bin`);
+      await writeFile(srcPath, data);
+      const contentId = hashPlaintextBuffer(data, contentKey);
+      const store = backend.bundleStore(fullId, dir);
+      await packResource({
+        filePath: srcPath,
+        fileSize: data.length,
+        mk,
+        bundleId: fullId,
+        createdAt: new Date(0).toISOString(),
+        chunkSize: opts.chunkSize,
+        store,
+        name: basename(srcPath),
+        contentId,
+      });
+      return { fullId, dir };
+    },
+    async pullOne(fullId, dir, outPath, opts) {
+      return pullOneBundle(rt, backend, mk, contentKey, fullId, dir, outPath, opts);
+    },
+    async writeLiveDownloadLock(fullId, dir, outPath) {
+      const store = backend.bundleStore(fullId, dir);
+      const { manifest, meta } = await readResourceMeta(mk, store);
+      const jkey = pullJournalKey(meta.contentId, fullId);
+      const jpath = journalPath(tmp, "download", jkey, outPath);
+      await writeJournal(jpath, {
+        bundleId: fullId,
+        cloudDir: dir,
+        contentId: meta.contentId ?? "",
+        doneChunks: [],
+        totalChunks: manifest.chunks.length,
+        startedAt: new Date().toISOString(), // 现在 → 存活窗口内
+        pid: process.pid, // 本进程 → pidAlive 恒真
+      });
+    },
+    async seedResume(fullId, dir, outPath, data, opts) {
+      const store = backend.bundleStore(fullId, dir);
+      const { manifest, meta } = await readResourceMeta(mk, store);
+      const jkey = pullJournalKey(meta.contentId, fullId);
+      const jpath = journalPath(tmp, "download", jkey, outPath);
+      const prefixLen = manifest.chunks
+        .filter((c) => opts.doneChunks.includes(c.seq))
+        .reduce((a, c) => a + c.plainSize, 0);
+      const partPath = `${outPath}.part`;
+      await mkdir(dirname(partPath), { recursive: true });
+      await writeFile(partPath, data.subarray(0, prefixLen));
+      await writeJournal(jpath, {
+        bundleId: fullId,
+        cloudDir: dir,
+        contentId: meta.contentId ?? "",
+        doneChunks: [...opts.doneChunks],
+        totalChunks: manifest.chunks.length,
+        startedAt: new Date(0).toISOString(), // 久远过去，且 pid 不存活 → 判定为崩溃残留
+        pid: STALE_PID,
+      });
+      return {
+        get getChunkCalls(): number[] {
+          return backend.recordedGetChunkCalls(fullId);
+        },
+      };
+    },
+    async seedResumeCorrupt(fullId, dir, outPath, opts) {
+      const store = backend.bundleStore(fullId, dir);
+      const { manifest, meta } = await readResourceMeta(mk, store);
+      const jkey = pullJournalKey(meta.contentId, fullId);
+      const jpath = journalPath(tmp, "download", jkey, outPath);
+      const chunk0 = manifest.chunks.find((c) => opts.doneChunks.includes(c.seq));
+      if (!chunk0) throw new BizhouError("INVALID_ARG", "seedResumeCorrupt: doneChunks 无对应分片");
+      // 与真实明文不同的篡改字节（长度与真实首片一致，保证续传写偏移正确，但内容不符）。
+      const corrupted = Buffer.alloc(chunk0.plainSize, 0xff);
+      const partPath = `${outPath}.part`;
+      await mkdir(dirname(partPath), { recursive: true });
+      await writeFile(partPath, corrupted);
+      await writeJournal(jpath, {
+        bundleId: fullId,
+        cloudDir: dir,
+        contentId: meta.contentId ?? "",
+        doneChunks: [...opts.doneChunks],
+        totalChunks: manifest.chunks.length,
+        startedAt: new Date(0).toISOString(),
+        pid: STALE_PID,
+      });
+    },
+    async exists(p) {
+      try {
+        await stat(p);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  };
 }
