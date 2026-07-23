@@ -198,6 +198,23 @@
 
 **验收目标：** 下载往返字节一致；幂等跳过/在飞锁/分片续传/端到端校验各有集成测试；`bun test` 全量无回归；typecheck/lint/build 全过。**续传正确性双保险：** 逐片密文 sha256（下载即校验）+ 装配后端到端 contentId（防日志/flush 竞态跳过实际缺失片）；无 contentId 的旧 bundle 退化为仅前者。**红线：** 端到端校验不过绝不 rename 交付、绝不静默写损坏。
 
+### Phase 3 · D1 — daemon / 定时备份 📋 **计划就绪，待开跑**
+
+> 设计：`docs/superpowers/specs/2026-07-24-daemon-scheduled-backup-design.md`
+> 计划：`docs/superpowers/plans/2026-07-24-daemon-scheduled-backup-d1.md`（含各任务完整 TDD 步骤）
+> 复用 S1 `pushOneFile`（去重/续传/在飞锁兜底）。执行方式：子代理驱动。
+
+| 任务 | 说明 | 责任人 | 状态 |
+|-----|------|--------|------|
+| D1-T1 | 核心备份任务模型 + `backups.json` 持久化（add/list/rm/update，原子，无密钥） | AI | ⬜ 待开始 |
+| D1-T2 | CLI `bz backup add/list/rm` 命令（新 `daemon.ts`，单向依赖 commands.ts） | AI | ⬜ 待开始 |
+| D1-T3 | `sweepJob` 幂等备份引擎（walk + pushOneFile + 单文件错误隔离）+ `bz backup run` | AI | ⬜ 待开始 |
+| D1-T4 | 跨平台递归 watcher + 防抖（debounce/listDirsRecursive 可测；fs.watch 薄壳手动验证） | AI | ⬜ 待开始 |
+| D1-T5 | `bz daemon` 三触发编排 + `SerialJobRunner` 串行护栏 + 优雅退出 + config 间隔/防抖 | AI | ⬜ 待开始 |
+
+**范围/语义：** 注册式备份任务；三触发（启动即扫 / 实时监听防抖 / 定时兜底）共用幂等 `sweepJob`；**备份语义永不删云**（本地删不镜像）；前台进程、SIGINT/SIGTERM 优雅退出；MK 驻内存至退出。**测试边界：** 模型/引擎/防抖/串行护栏纯逻辑自动化覆盖；`fs.watch` OS 事件与完整 daemon 长跑 = 手动/集成验证。**红线：** daemon 不打印密钥；加密全复用 S1；零新依赖。
+
 ### Phase 3 · 其余候选（待细化）
 
-> shell 补全、更多预览类型、daemon/定时备份、进 homebrew-core / winget、worker_threads 并行加密（网络场景零收益，仅 gzip/纯本地备份时再评估）。各自 spec→plan→执行。
+> shell 补全、更多预览类型、进 homebrew-core / winget、worker_threads 并行加密（网络场景零收益，仅 gzip/纯本地备份时再评估）。各自 spec→plan→执行。
+> （daemon/定时备份 已细化为上方 D1；worker_threads 已由 S1 澄清定型为上传并发。）
