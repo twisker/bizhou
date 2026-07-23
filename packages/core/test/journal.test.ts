@@ -18,6 +18,7 @@ const entry = (): JournalEntry => ({
   contentId: "f".repeat(64),
   doneChunks: [],
   totalChunks: 3,
+  wrappedKey: "d2hhdGV2ZXItYmFzZTY0LWJsb2I=", // MK 包裹的 DEK（此处仅需形状正确的 base64 串）
   startedAt: "2026-07-23T00:00:00.000Z",
   pid: 4242,
 });
@@ -72,6 +73,12 @@ describe("上传日志", () => {
       const badShape = join(dir, "bad-shape.json");
       await writeFile(badShape, JSON.stringify({ bundleId: "x", doneChunks: [] }), "utf8");
       expect(await readJournal(badShape)).toBeNull();
+
+      // 仅缺 wrappedKey（其余字段齐全）也应拒收：续传无从还原 DEK，绝不能当有效日志用。
+      const noWrapped = join(dir, "no-wrapped.json");
+      const { wrappedKey: _omit, ...withoutWrapped } = entry();
+      await writeFile(noWrapped, JSON.stringify(withoutWrapped), "utf8");
+      expect(await readJournal(noWrapped)).toBeNull();
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

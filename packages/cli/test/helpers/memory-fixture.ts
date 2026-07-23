@@ -8,7 +8,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   type Backend,
   BizhouError,
@@ -16,10 +16,15 @@ import {
   type DirListing,
   deriveContentKey,
   generateBundleId,
+  generateKey,
   hashPlaintextFile,
   journalPath,
   MemoryBundleStore,
   normalizeCloudPath,
+  packResource,
+  unpackResource,
+  type UnpackResult,
+  wrapDek,
   writeJournal,
 } from "@bizhou/core";
 import { type PushOneOpts, type PushOneResult, pushOneFile } from "../../src/commands.ts";
@@ -40,6 +45,10 @@ class RecordingBundleStore implements BundleStore {
   }
   async putChunk(seq: number, data: Buffer): Promise<void> {
     this.putChunkCalls.push(seq);
+    await this.inner.putChunk(seq, data);
+  }
+  /** 预置一片密文但不计入 putChunkCalls（模拟"上次已上传、本次崩溃前留下"的分片）。 */
+  async seedChunk(seq: number, data: Buffer): Promise<void> {
     await this.inner.putChunk(seq, data);
   }
   getChunk(seq: number): Promise<Buffer> {
@@ -96,6 +105,14 @@ class MemoryBackend implements Backend {
     return this.byBundleId.get(bundleId)?.store.putChunkCalls ?? [];
   }
 
+  /** 预置一个 bundle：仅含给定的已上传分片密文（不计入 putChunkCalls），无 manifest。模拟崩溃残留。 */
+  async seedBundle(bundleId: string, cloudDir: string, chunks: Map<number, Buffer>): Promise<void> {
+    const dir = normalizeCloudPath(cloudDir);
+    const store = new RecordingBundleStore(bundleId);
+    for (const [seq, data] of chunks) await store.seedChunk(seq, data);
+    this.byBundleId.set(bundleId, { dir, store });
+  }
+
   async move(): Promise<void> {
     throw new BizhouError("IO", "内存后端未实现 move（本夹具不需要）");
   }
@@ -129,11 +146,18 @@ export interface MemoryFixture {
   pushOneFile(absFile: string, cloudDir: string, opts: PushOneOpts): Promise<PushOneResult>;
   countBundles(cloudDir: string): Promise<number>;
   writeLiveLock(absFile: string, cloudDir: string): Promise<{ bundleId: string }>;
-  writeStaleLockWithChunk0(
+  /**
+   * 真·打包一次到内存 store（产出真实 DEK 加密的分片密文），随后模拟崩溃：
+   * 只保留 seq 0 的密文、丢弃 manifest 与其余分片，并写一份陈旧续传日志
+   * （含 MK 包裹的同一 DEK）。返回续传所需信息 + 延迟读取的 putChunkCalls。
+   */
+  packThenCrashAfterChunk0(
     absFile: string,
     cloudDir: string,
     opts: { chunkSize: number },
   ): Promise<{ bundleId: string; putChunkCalls: number[] }>;
+  /** 从内存 store 拉回并解密 bundle 到 outPath（校验 sha256/GCM），供往返一致性断言。 */
+  pull(bundleId: string, cloudDir: string, outPath: string): Promise<UnpackResult>;
 }
 
 export async function makeMemoryFixture(): Promise<MemoryFixture> {
@@ -183,24 +207,48 @@ export async function makeMemoryFixture(): Promise<MemoryFixture> {
         contentId,
         doneChunks: [],
         totalChunks: 1,
+        wrappedKey: wrapDek(mk, generateKey()), // 形状正确即可（存活锁不会被续传）
         startedAt: new Date().toISOString(), // 现在 → 存活窗口内
         pid: process.pid, // 本进程 → pidAlive 恒真
       });
       return { bundleId };
     },
-    async writeStaleLockWithChunk0(absFile, cloudDir, opts) {
+    async packThenCrashAfterChunk0(absFile, cloudDir, opts) {
       const contentId = await hashPlaintextFile(absFile, contentKey);
       const dir = normalizeCloudPath(cloudDir);
       const bundleId = generateBundleId();
-      const jpath = journalPath(tmp, "upload", contentId, dir);
+      const dek = generateKey(); // 首次上传使用的 DEK
       const { size } = await stat(absFile);
       const totalChunks = Math.max(1, Math.ceil(size / opts.chunkSize));
+
+      // 1. 真·打包一次：产出该 DEK 加密的全部分片密文 + manifest（写到临时 store）。
+      const fullStore = new MemoryBundleStore(bundleId);
+      await packResource({
+        filePath: absFile,
+        fileSize: size,
+        mk,
+        dek,
+        bundleId,
+        createdAt: new Date(0).toISOString(),
+        chunkSize: opts.chunkSize,
+        store: fullStore,
+        name: basename(absFile),
+        contentId,
+      });
+
+      // 2. 模拟崩溃：只把 seq 0 的真实密文留给 backend，丢弃 manifest 与其余分片。
+      const chunk0 = await fullStore.getChunk(0);
+      await backend.seedBundle(bundleId, dir, new Map([[0, chunk0]]));
+
+      // 3. 写陈旧续传日志：含 MK 包裹的同一 DEK、doneChunks=[0]、已死 pid。
+      const jpath = journalPath(tmp, "upload", contentId, dir);
       await writeJournal(jpath, {
         bundleId,
         cloudDir: dir,
         contentId,
         doneChunks: [0],
         totalChunks,
+        wrappedKey: wrapDek(mk, dek),
         startedAt: new Date(0).toISOString(), // 久远过去，且 pid 不存活 → 判定为崩溃残留
         pid: STALE_PID,
       });
@@ -210,6 +258,10 @@ export async function makeMemoryFixture(): Promise<MemoryFixture> {
           return backend.recordedCalls(bundleId);
         },
       };
+    },
+    async pull(bundleId, cloudDir, outPath) {
+      const store = backend.bundleStore(bundleId, normalizeCloudPath(cloudDir));
+      return unpackResource({ mk, store, outPath });
     },
   };
 }

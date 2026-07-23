@@ -24,6 +24,7 @@ import {
   downloadLocalPath,
   exchangeCodeForToken,
   generateBundleId,
+  generateKey,
   generateSalt,
   getCachedManifest,
   groupBase32,
@@ -48,6 +49,7 @@ import {
   unlockWithRecovery,
   unpackResource,
   unwrapDek,
+  wrapDek,
   wrapKey,
   writeJournal,
 } from "@bizhou/core";
@@ -270,8 +272,11 @@ function pidAlive(pid: number): boolean {
 
 /** flag 覆盖 > rt 配置 > 默认 4，clamp 到 [1,16]。 */
 export function resolveUploadConcurrency(rt: Runtime, flag?: number): number {
-  const v = flag ?? rt.uploadConcurrency ?? 4;
-  return Math.min(16, Math.max(1, Math.floor(v)));
+  // `--concurrency foo` → Number(...) 得 NaN；NaN ?? x 仍是 NaN（?? 只挡 null/undefined），
+  // 且 Math.floor/min/max 会把 NaN 一路传播。用 Number.isFinite 显式回退到配置/默认值。
+  const v = Number.isFinite(flag) ? (flag as number) : (rt.uploadConcurrency ?? 4);
+  const finite = Number.isFinite(v) ? v : 4;
+  return Math.min(16, Math.max(1, Math.floor(finite)));
 }
 
 /** 扫目标云端目录，返回与 targetContentId 相同的已完成 bundleId（走 manifest 缓存），无则 null。 */
@@ -344,6 +349,8 @@ export async function pushOneFile(
   let bundleId: string;
   let skipExisting: number[] = [];
   let status: "uploaded" | "resumed" = "uploaded";
+  // DEK 必须跨续传保持一致：已上传分片是首次 DEK 的密文，manifest 也须用同一 DEK 封装。
+  let dek: Buffer;
   if (existing) {
     const alive = isLockAlive(existing, {
       ttlMs: UPLOAD_LOCK_TTL_MS,
@@ -351,15 +358,17 @@ export async function pushOneFile(
       pidAlive: pidAlive(existing.pid),
     });
     if (alive && !opts.force) {
-      warn(`同文件正在上传至该目录，已结束：${absFile}`);
+      warn(`同文件正在上传至该目录，本次跳过：${absFile}`);
       return { bundleId: existing.bundleId, status: "locked" };
     }
-    // 崩溃残留（或 --force 复用）→ 续传
+    // 崩溃残留（或 --force 复用）→ 续传：复用 bundleId + doneChunks + 同一 DEK。
     bundleId = existing.bundleId;
     skipExisting = existing.doneChunks;
+    dek = unwrapDek(mk, existing.wrappedKey);
     status = "resumed";
   } else {
     bundleId = generateBundleId();
+    dek = generateKey();
   }
 
   const chunkSize = opts.noSplit
@@ -379,6 +388,7 @@ export async function pushOneFile(
     contentId,
     doneChunks: skipExisting,
     totalChunks,
+    wrappedKey: wrapDek(mk, dek), // MK 包裹的 DEK（非裸密钥），供续传还原同一 DEK
     startedAt: new Date(rt.now()).toISOString(),
     pid: process.pid,
   });
@@ -386,8 +396,12 @@ export async function pushOneFile(
   let preview: { kind: "video" | "audio" | "image"; data: Buffer } | undefined;
   if (opts.preview) {
     const p = await generatePreview(absFile);
-    if (p) preview = p;
-    else warn("未生成预览（非媒体类型或 ffmpeg 不可用），继续上传原文件。");
+    if (p) {
+      preview = p;
+      info(`已生成预览包（${p.kind}，${formatBytes(p.data.length)}）`);
+    } else {
+      warn("未生成预览（非媒体类型或 ffmpeg 不可用），继续上传原文件。");
+    }
   }
 
   // onProgress 在该片 putChunk 完成之后触发，但本身是同步回调（chunker 不 await 它）。
@@ -399,6 +413,7 @@ export async function pushOneFile(
       filePath: absFile,
       fileSize: st.size,
       mk,
+      dek,
       bundleId,
       createdAt: new Date(rt.now()).toISOString(),
       chunkSize,

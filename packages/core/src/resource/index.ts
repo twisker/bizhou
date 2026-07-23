@@ -32,6 +32,12 @@ export interface PackOptions {
   readonly fileSize: number;
   /** MK：由 vault 解锁得到。 */
   readonly mk: Buffer;
+  /**
+   * 可选注入的 DEK：续传（resume）时必须传入与首次相同的 DEK，
+   * 否则已上传分片是旧 DEK 的密文、新 manifest 却用新 DEK 封装，
+   * 会导致整个 bundle 不可解（sha256/GCM 校验失败）。不传则新建随机 DEK。
+   */
+  readonly dek?: Buffer;
   readonly bundleId: string;
   readonly createdAt: string;
   readonly chunkSize?: number;
@@ -52,7 +58,7 @@ export interface PackOptions {
 export async function packResource(opts: PackOptions): Promise<Manifest> {
   const chunkSize = opts.chunkSize ?? DEFAULT_CHUNK_SIZE;
   const compression = opts.compression ?? "none";
-  const dek = generateKey();
+  const dek = opts.dek ?? generateKey();
 
   const chunks = await encryptFileToChunks({
     filePath: opts.filePath,

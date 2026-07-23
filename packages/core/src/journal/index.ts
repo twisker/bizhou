@@ -16,6 +16,12 @@ export interface JournalEntry {
   readonly contentId: string;
   readonly doneChunks: number[];
   readonly totalChunks: number;
+  /**
+   * 该 bundle 的 DEK 被 MK 包裹后的 base64 blob（与 manifest.wrappedKey 同等保护）。
+   * 续传时据此还原出与首次相同的 DEK，保证已上传分片与新 manifest 用同一 DEK。
+   * 注意：这是 MK 包裹后的密文，绝非裸密钥；日志仅存于本地 keyRoot 下、绝不上云、绝不打印。
+   */
+  readonly wrappedKey: string;
   readonly startedAt: string; // ISO8601，CLI 注入
   readonly pid: number; // CLI 注入
 }
@@ -44,6 +50,7 @@ function isValidJournalEntry(e: unknown): e is JournalEntry {
     Array.isArray(o.doneChunks) &&
     o.doneChunks.every((n) => typeof n === "number") &&
     typeof o.totalChunks === "number" &&
+    typeof o.wrappedKey === "string" &&
     typeof o.startedAt === "string" &&
     typeof o.pid === "number"
   );

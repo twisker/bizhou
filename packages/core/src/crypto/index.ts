@@ -10,6 +10,7 @@
 import {
   createCipheriv,
   createDecipheriv,
+  createHmac,
   randomBytes,
   type ScryptOptions,
   scrypt as scryptCallback,
@@ -68,15 +69,36 @@ function assertKey(key: Buffer): void {
   }
 }
 
-/** 用 AES-256-GCM 加密。可选 AAD（附加认证数据，参与完整性校验但不加密）。 */
-export function aeadEncrypt(key: Buffer, plaintext: Buffer, aad?: Buffer): AeadResult {
+/**
+ * 由 key 与一段唯一上下文（如 chunkAad = bundleId||seq）确定性派生 12B GCM IV。
+ *
+ * 用途：断点续传要求"跳过重传的分片"其 manifest 记录（iv/tag/sha256）必须与云端已存密文
+ * 逐字节一致。随机 IV 会让续传时重新加密同一分片得到不同密文，与已上传密文不符 → pull 校验失败。
+ * 以 HMAC-SHA256(key, context) 截断为 IV，使"同 key + 同上下文 + 同明文"必得同一密文。
+ *
+ * 安全性：GCM 要求 (key, IV) 唯一。这里 key=DEK（每 bundle 随机唯一），context 含 bundleId+seq
+ * （bundle 内每分片唯一）→ (key, IV) 全局唯一。仅当"同一分片被同 DEK 重新加密"时 IV 重复，
+ * 而此时明文亦相同（续传前 contentId 已校验文件未变，见 journal 以 contentId 为键），
+ * 属同一 (key, IV, 明文) 的重复运算，不构成 nonce 复用漏洞。IV 无需保密，唯一即可。
+ */
+export function deriveDeterministicIv(key: Buffer, context: Buffer): Buffer {
+  return createHmac("sha256", key).update(context).digest().subarray(0, IV_BYTES);
+}
+
+/**
+ * 用 AES-256-GCM 加密。可选 AAD（附加认证数据，参与完整性校验但不加密）。
+ * 可选 iv：不传则用 CSPRNG 随机 IV；传入（须 12B）则用确定性 IV（供续传逐字节复现，见
+ * `deriveDeterministicIv`）。调用方须自行保证 (key, iv) 唯一。
+ */
+export function aeadEncrypt(key: Buffer, plaintext: Buffer, aad?: Buffer, iv?: Buffer): AeadResult {
   assertKey(key);
-  const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv(CIPHER_ALGO, key, iv, { authTagLength: TAG_BYTES });
+  if (iv && iv.length !== IV_BYTES) throw new CryptoError(`IV 长度必须为 ${IV_BYTES} 字节`);
+  const nonce = iv ?? randomBytes(IV_BYTES);
+  const cipher = createCipheriv(CIPHER_ALGO, key, nonce, { authTagLength: TAG_BYTES });
   if (aad) cipher.setAAD(aad);
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return { iv, ciphertext, tag };
+  return { iv: nonce, ciphertext, tag };
 }
 
 /**

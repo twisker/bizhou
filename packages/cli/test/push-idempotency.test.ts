@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { randomBytes } from "node:crypto";
+import { readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { deriveContentKey } from "@bizhou/core";
+import { resolveUploadConcurrency } from "../src/commands.ts";
+import type { Runtime } from "../src/runtime.ts";
 import { makeMemoryFixture } from "./helpers/memory-fixture.ts";
 
 describe("push 幂等/续传/锁（内存后端）", () => {
@@ -52,19 +54,41 @@ describe("push 幂等/续传/锁（内存后端）", () => {
     }
   });
 
-  test("续传：崩溃残留日志（doneChunks=[0]）→ resumed，skipExisting 生效", async () => {
+  test("续传往返：崩溃后复用同一 DEK，pull 出的字节与原文件完全一致", async () => {
     const fx = await makeMemoryFixture();
     try {
       const f = join(fx.tmp, "d.bin");
-      // 造 3 个逻辑分片（chunkSize 小）
-      await writeFile(f, Buffer.alloc(300, 7));
-      const seen = await fx.writeStaleLockWithChunk0(f, "/z", { chunkSize: 100 });
+      // 3 个逻辑分片（chunkSize=100），用随机内容确保字节级比对有意义。
+      const original = randomBytes(300);
+      await writeFile(f, original);
+      // 真·打包一次并模拟崩溃：只留 seq 0 的密文 + 陈旧日志（含 MK 包裹的首次 DEK）。
+      const seen = await fx.packThenCrashAfterChunk0(f, "/z", { chunkSize: 100 });
       const r = await fx.pushOneFile(f, "/z", { chunk: "100" });
       expect(r.status).toBe("resumed");
       expect(r.bundleId).toBe(seen.bundleId); // 复用 bundleId
       expect(seen.putChunkCalls).not.toContain(0); // 第 0 片被 skipExisting 跳过
+      // 关键回归断言：续传必须复用首次 DEK，否则 seq 0（旧 DEK 密文）与新 manifest 不匹配，
+      // pull 会在 sha256/GCM 校验处抛错。旧的 fresh-DEK 代码在此必失败。
+      const outPath = join(fx.tmp, "d.out");
+      const res = await fx.pull(seen.bundleId, "/z", outPath);
+      const restored = await readFile(outPath);
+      expect(restored.equals(original)).toBe(true); // 字节级往返一致
+      expect(res.bytesWritten).toBe(original.length);
     } finally {
       await rm(fx.tmp, { recursive: true, force: true });
     }
+  });
+
+  test("--concurrency 非数字（NaN）回退为受限有限默认值", () => {
+    const rt = { uploadConcurrency: 4 } as unknown as Runtime;
+    // `bz --concurrency foo` → Number("foo") = NaN；不得传播为 NaN。
+    const v = resolveUploadConcurrency(rt, Number("foo"));
+    expect(Number.isFinite(v)).toBe(true);
+    expect(v).toBe(4); // 回退到 rt.uploadConcurrency，clamp 后仍为 4
+    // rt.uploadConcurrency 本身缺失时也要有兜底。
+    const v2 = resolveUploadConcurrency({} as unknown as Runtime, NaN);
+    expect(Number.isFinite(v2)).toBe(true);
+    expect(v2).toBeGreaterThanOrEqual(1);
+    expect(v2).toBeLessThanOrEqual(16);
   });
 });

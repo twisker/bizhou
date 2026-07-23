@@ -11,7 +11,7 @@ import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { type ChunkInfo, type Compression, chunkAad, chunkFileName } from "../bundle/index.ts";
-import { aeadDecrypt, aeadEncrypt } from "../crypto/index.ts";
+import { aeadDecrypt, aeadEncrypt, deriveDeterministicIv } from "../crypto/index.ts";
 import { BizhouError } from "../errors.ts";
 import type { ProgressCallback } from "../events/index.ts";
 import type { BundleStore } from "../store/index.ts";
@@ -50,7 +50,15 @@ export async function encryptFileToChunks(opts: EncryptFileOptions): Promise<Chu
       if (bytesRead === 0 && seq > 0) break; // 已到末尾（空文件时 seq===0，仍产出一个空分片）
       const plain = buf.subarray(0, bytesRead);
       const payload = opts.compression === "gzip" ? gzipSync(plain) : plain;
-      const { iv, ciphertext, tag } = aeadEncrypt(opts.dek, payload, chunkAad(opts.bundleId, seq));
+      // 确定性 IV（由 DEK + bundleId + seq 派生）：使续传时"跳过重传的分片"重新加密后
+      // 与云端已存密文逐字节一致，manifest 记录的 iv/tag/sha256 因而与已上传密文相符。
+      const aad = chunkAad(opts.bundleId, seq);
+      const { iv, ciphertext, tag } = aeadEncrypt(
+        opts.dek,
+        payload,
+        aad,
+        deriveDeterministicIv(opts.dek, aad),
+      );
       if (!skip.has(seq)) {
         await opts.store.putChunk(seq, ciphertext);
       }
