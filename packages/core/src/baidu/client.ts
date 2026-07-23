@@ -176,9 +176,11 @@ export class BaiduClient {
     const slices = sliceTransfer(data);
     const blockMd5 = slices.map(md5hex);
     const { uploadid, blocksToUpload } = await this.precreate(path, data.length, blockMd5);
+    // precreate 返回的 blocksToUpload 即"仍需上传的分片索引"：
+    // 只上传其中的分片（断点续传 / 秒传时可能为空 → 一片都不传，直接 create）。
     const need = new Set(blocksToUpload);
     for (let i = 0; i < slices.length; i++) {
-      if (need.size > 0 && !need.has(i)) continue; // 已上传，跳过（续传）
+      if (!need.has(i)) continue;
       await this.uploadSlice(path, uploadid, i, slices[i]!);
       onSlice?.(i, slices.length);
     }

@@ -18,6 +18,7 @@ import {
   type HttpClient,
   LocalBundleStore,
   type OAuthConfig,
+  refreshAccessToken,
   unlockWithPassword,
   VaultError,
   type VaultFile,
@@ -110,13 +111,25 @@ export function createRuntime(): Runtime {
   };
 }
 
-/** 为当前账号构建 Baidu 客户端（自动刷新过期 token）。 */
+/** 为当前账号构建 Baidu 客户端（token 临近过期时用 refresh_token 自动刷新）。 */
 export async function baiduClientForCurrent(rt: Runtime): Promise<BaiduClient> {
   const cur = await rt.accounts.getCurrent();
   if (!cur) {
     throw new VaultError("尚未登录任何账号：请先 `bz login`");
   }
-  return new BaiduClient(rt.oauthConfig(), cur.tokens.accessToken, rt.http);
+  let tokens = cur.tokens;
+  const nearExpiry = tokens.expiresAt !== undefined && Date.now() > tokens.expiresAt - 60_000;
+  if (nearExpiry && tokens.refreshToken) {
+    const r = await refreshAccessToken(rt.oauthConfig(), tokens.refreshToken, rt.http);
+    tokens = {
+      accessToken: r.accessToken,
+      refreshToken: r.refreshToken ?? tokens.refreshToken,
+      expiresAt: Date.now() + r.expiresIn * 1000,
+      scope: r.scope ?? tokens.scope,
+    };
+    await rt.accounts.updateTokens(cur.name, tokens);
+  }
+  return new BaiduClient(rt.oauthConfig(), tokens.accessToken, rt.http);
 }
 
 /** 根据 --local 选项决定用本地目录 store 还是百度 store。 */

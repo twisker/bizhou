@@ -124,6 +124,27 @@ describe("uploadPart 编排（precreate→superfile2→create）", () => {
     expect(uploaded).toEqual([2]); // 只补上缺的那片
   });
 
+  test("秒传：precreate 返回空 block_list → 一片都不上传，直接 create", async () => {
+    const data = randomBytes(TRANSFER_SLICE * 2); // 2 片
+    const uploaded: number[] = [];
+    let created = false;
+    const http: HttpClient = async (url) => {
+      if (url.includes("precreate")) return jsonRes({ errno: 0, uploadid: "UP", block_list: [] });
+      if (url.includes("superfile2")) {
+        uploaded.push(Number(url.match(/partseq=(\d+)/)![1]));
+        return jsonRes({ md5: "m" });
+      }
+      if (url.includes("create")) {
+        created = true;
+        return jsonRes({ errno: 0, fs_id: 1 });
+      }
+      throw new Error("unexpected");
+    };
+    await new BaiduClient(CONFIG, "AT", http).uploadPart(`${APP_ROOT}/x.bz/000.part`, data);
+    expect(uploaded).toEqual([]); // 秒传：不传任何分片
+    expect(created).toBe(true); // 仍然 create 合并
+  });
+
   test("errno 非 0 → 抛 BizhouBAIDUError", async () => {
     const http: HttpClient = async (url) =>
       url.includes("precreate") ? jsonRes({ errno: 31034 }) : jsonRes({ errno: 0 });
