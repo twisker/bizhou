@@ -134,6 +134,25 @@ test("push -r 递归上传目录树，pull -r 还原字节级一致", async () =
   }
 });
 
+test("push -r 不带 --to：缺省按文件根镜像目录位置", async () => {
+  const fr = join(work, "fr3");
+  process.env.BIZHOU_FILE_ROOT = fr;
+  try {
+    const rt = createRuntime();
+    // 源目录在文件根下：fileRoot/收藏/tree2
+    const treeDir = join(fr, "收藏", "tree2");
+    await mkdir(join(treeDir, "sub"), { recursive: true });
+    const f1 = randomBytes(800);
+    await writeFile(join(treeDir, "sub", "x.bin"), f1);
+    // 不给 --to：目录父(/收藏)镜像 + basename(tree2) → 云端 /收藏/tree2
+    await cmdPush(rt, treeDir, { local: store, recursive: true });
+    await cmdPull(rt, "/收藏/tree2", { local: store, recursive: true });
+    expect(sha256(await readFile(join(fr, "收藏", "tree2", "sub", "x.bin")))).toBe(sha256(f1));
+  } finally {
+    delete process.env.BIZHOU_FILE_ROOT;
+  }
+});
+
 test("push -r 对非目录报错", async () => {
   const f = join(work, "not-a-dir.bin");
   await writeFile(f, Buffer.from("x"));
