@@ -40,7 +40,7 @@ export async function sweepJob(
   job: BackupJob,
   log: SweepLogger,
 ): Promise<SweepResult> {
-  const localDir = job.localDir;
+  const localDir = resolve(job.localDir); // 与 cmdPushRecursive 对齐；防手改 backups.json 存入相对路径致云端落点偏移
   const st = await stat(localDir).catch(() => null);
   if (!st?.isDirectory()) {
     log(`跳过（源目录不存在）：${localDir}`);
