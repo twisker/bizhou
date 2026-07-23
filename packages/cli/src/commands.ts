@@ -2,41 +2,57 @@
  * bz 各命令实现。命令只做"编排 + 交互 + 渲染"，加密/分片/对接全在 @bizhou/core。
  */
 
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
+  appendDoneChunk,
   type Backend,
   BizhouError,
+  BUNDLE_SUFFIX,
   base32Decode,
   base32Encode,
   buildAuthorizeUrl,
   bundleDirName,
+  type Compression,
   changePassword,
   createVault,
   DEFAULT_CHUNK_SIZE,
   defaultUploadCloudDir,
+  deriveContentKey,
   deriveKey,
   downloadLocalPath,
   exchangeCodeForToken,
   generateBundleId,
+  generateKey,
   generateSalt,
+  getCachedManifest,
   groupBase32,
+  hashPlaintextFile,
+  invalidateManifest,
+  isLockAlive,
   joinCloudPath,
+  journalPath,
   normalizeCloudPath,
+  openMeta,
   openPreview,
   packResource,
   parseManifest,
   pollDeviceToken,
+  putCachedManifest,
+  readJournal,
   readResourceMeta,
+  removeJournal,
   renameResource,
   startDeviceFlow,
   unlockWithPassword,
   unlockWithRecovery,
   unpackResource,
   unwrapDek,
+  wrapDek,
   wrapKey,
+  writeJournal,
 } from "@bizhou/core";
 import { findSevenZip, sevenZipArchive } from "./export7z.ts";
 import { generatePreview } from "./preview.ts";
@@ -242,6 +258,221 @@ export async function cmdAccount(
 
 // ---- push / pull / ls / info / rm ----------------------------------------
 
+/** 在飞锁 TTL：拥有进程已死时，仍在此窗口内视为存活（防误判刚启动的并发/覆盖大文件长传）。 */
+const UPLOAD_LOCK_TTL_MS = 30 * 60 * 1000;
+
+/** 探测 pid 是否存活（不发信号，仅探测）；EPERM 说明进程存在但无权信号之，也算存活。 */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as { code?: string }).code === "EPERM";
+  }
+}
+
+/** flag 覆盖 > rt 配置 > 默认 4，clamp 到 [1,16]。 */
+export function resolveUploadConcurrency(rt: Runtime, flag?: number): number {
+  // `--concurrency foo` → Number(...) 得 NaN；NaN ?? x 仍是 NaN（?? 只挡 null/undefined），
+  // 且 Math.floor/min/max 会把 NaN 一路传播。用 Number.isFinite 显式回退到配置/默认值。
+  const v = Number.isFinite(flag) ? (flag as number) : (rt.uploadConcurrency ?? 4);
+  const finite = Number.isFinite(v) ? v : 4;
+  return Math.min(16, Math.max(1, Math.floor(finite)));
+}
+
+/** 扫目标云端目录，返回与 targetContentId 相同的已完成 bundleId（走 manifest 缓存），无则 null。 */
+async function findDuplicateBundle(
+  rt: Runtime,
+  backend: Backend,
+  mk: Buffer,
+  cloudDir: string,
+  targetContentId: string,
+): Promise<string | null> {
+  const { bundles } = await backend.listDir(cloudDir);
+  for (const b of bundles) {
+    let raw = await getCachedManifest(rt.paths.dir, b.id);
+    if (raw === null) {
+      try {
+        raw = await backend.bundleStore(b.id, cloudDir).getManifest();
+      } catch {
+        continue; // 该 bundle 尚不完整（无 manifest）→ 跳过
+      }
+      await putCachedManifest(rt.paths.dir, b.id, raw);
+    }
+    try {
+      const m = parseManifest(raw);
+      const meta = openMeta(unwrapDek(mk, m.wrappedKey), m.encMeta);
+      if (meta.contentId === targetContentId) return b.id;
+    } catch {}
+  }
+  return null;
+}
+
+export interface PushOneOpts {
+  chunk?: string;
+  compress?: boolean;
+  noSplit?: boolean;
+  name?: string;
+  preview?: boolean;
+  force?: boolean;
+}
+
+export interface PushOneResult {
+  bundleId: string;
+  status: "uploaded" | "skipped-dup" | "locked" | "resumed";
+}
+
+/** 单文件上传内核：预哈希 → 去重 → 锁/续传 → packResource。cmdPush 与递归 push 共用。 */
+export async function pushOneFile(
+  rt: Runtime,
+  backend: Backend,
+  mk: Buffer,
+  contentKey: Buffer,
+  absFile: string,
+  cloudDir: string,
+  opts: PushOneOpts,
+): Promise<PushOneResult> {
+  const st = await stat(absFile);
+  const contentId = await hashPlaintextFile(absFile, contentKey);
+  const jpath = journalPath(rt.paths.dir, "upload", contentId, cloudDir);
+
+  // 云端目录必须先于去重扫描创建：BaiduBackend.listDir 对不存在的目录会抛错，
+  // 若目录尚未创建（如全新账号首次推送、或递归 push 中尚未出现过的子目录），
+  // 去重扫描会先于 mkdir 报错，导致首次推送失败。
+  if (cloudDir !== "/") await backend.mkdir(cloudDir);
+
+  // 1. 去重（--force 跳过）
+  if (!opts.force) {
+    const dup = await findDuplicateBundle(rt, backend, mk, cloudDir, contentId);
+    if (dup) {
+      warn(`目标已有相同文件（${c.bold(dup)}），跳过：${absFile}`);
+      return { bundleId: dup, status: "skipped-dup" };
+    }
+  }
+
+  // 本次调用的 flag 会得出的分片大小/压缩方式（新建时采用；续传时仅用于比对并提示）。
+  const optChunkSize = opts.noSplit
+    ? Math.max(st.size, 1)
+    : opts.chunk
+      ? parseSize(opts.chunk)
+      : DEFAULT_CHUNK_SIZE;
+  const optCompression: Compression = opts.compress ? "gzip" : "none";
+
+  // 2. 查日志：锁 or 续传 or 新建
+  const existing = await readJournal(jpath);
+  let bundleId: string;
+  let skipExisting: number[] = [];
+  let status: "uploaded" | "resumed" = "uploaded";
+  // DEK 必须跨续传保持一致：已上传分片是首次 DEK 的密文，manifest 也须用同一 DEK 封装。
+  let dek: Buffer;
+  // 分片大小/压缩方式：新建取本次 flag；续传必须沿用首次记录，否则 seq→明文映射改变，
+  // 确定性 IV 会在不同明文上复用（AES-GCM nonce 复用漏洞）。
+  let chunkSize: number;
+  let compression: Compression;
+  if (existing) {
+    const alive = isLockAlive(existing, {
+      ttlMs: UPLOAD_LOCK_TTL_MS,
+      now: rt.now(),
+      pidAlive: pidAlive(existing.pid),
+    });
+    if (alive && !opts.force) {
+      warn(`同文件正在上传至该目录，本次跳过：${absFile}`);
+      return { bundleId: existing.bundleId, status: "locked" };
+    }
+    // 崩溃残留（或 --force 复用）→ 续传：复用 bundleId + doneChunks + 同一 DEK + 同一分片/压缩。
+    // wrappedKey/chunkSize/compression 在 JournalEntry 类型上为可选（下载日志用不到），
+    // 但上传日志（本分支）在写入时（见下文 writeJournal）必写这三项；缺失即日志损坏/被篡改。
+    if (
+      existing.wrappedKey === undefined ||
+      existing.chunkSize === undefined ||
+      existing.compression === undefined
+    ) {
+      throw new BizhouError(
+        "INVALID_ARG",
+        `上传日志缺少必要字段（wrappedKey/chunkSize/compression），无法续传：${jpath}`,
+      );
+    }
+    bundleId = existing.bundleId;
+    skipExisting = existing.doneChunks;
+    dek = unwrapDek(mk, existing.wrappedKey);
+    status = "resumed";
+    chunkSize = existing.chunkSize;
+    compression = existing.compression;
+    if (chunkSize !== optChunkSize || compression !== optCompression) {
+      warn("续传：沿用原分片大小/压缩设置，忽略本次不同的 --chunk/--no-split/--compress");
+    }
+  } else {
+    bundleId = generateBundleId();
+    dek = generateKey();
+    chunkSize = optChunkSize;
+    compression = optCompression;
+  }
+
+  const totalChunks = Math.max(1, Math.ceil(st.size / chunkSize));
+
+  const store = backend.bundleStore(bundleId, cloudDir);
+
+  // 3. 写日志（上锁）
+  await writeJournal(jpath, {
+    bundleId,
+    cloudDir,
+    contentId,
+    doneChunks: skipExisting,
+    totalChunks,
+    chunkSize, // 固定分片大小，续传原样沿用（杜绝确定性 IV 的 nonce 复用）
+    compression, // 固定压缩方式，同上
+    wrappedKey: wrapDek(mk, dek), // MK 包裹的 DEK（非裸密钥），供续传还原同一 DEK
+    startedAt: new Date(rt.now()).toISOString(),
+    pid: process.pid,
+  });
+
+  let preview: { kind: "video" | "audio" | "image"; data: Buffer } | undefined;
+  if (opts.preview) {
+    const p = await generatePreview(absFile);
+    if (p) {
+      preview = p;
+      info(`已生成预览包（${p.kind}，${formatBytes(p.data.length)}）`);
+    } else {
+      warn("未生成预览（非媒体类型或 ffmpeg 不可用），继续上传原文件。");
+    }
+  }
+
+  // onProgress 在该片 putChunk 完成之后触发，但本身是同步回调（chunker 不 await 它）。
+  // 用一条串行队列把 appendDoneChunk 逐个链起来，避免并发 readJournal-writeJournal 互相覆盖，
+  // 并在 packResource 结束后 await 队列，确保"进程可能被打断前，已完成分片必已落盘日志"。
+  let chain: Promise<void> = Promise.resolve();
+  try {
+    await packResource({
+      filePath: absFile,
+      fileSize: st.size,
+      mk,
+      dek,
+      bundleId,
+      createdAt: new Date(rt.now()).toISOString(),
+      chunkSize,
+      compression,
+      store,
+      name: opts.name ?? basename(absFile),
+      mtime: st.mtime.toISOString(),
+      contentId,
+      preview,
+      skipExisting,
+      onProgress: (e) => {
+        renderProgress("加密", e.bytesDone, e.bytesTotal);
+        chain = chain.then(() => appendDoneChunk(jpath, e.seq));
+      },
+    });
+    await chain;
+  } catch (err) {
+    await chain.catch(() => {}); // 尽力落盘已完成分片的记录，但不掩盖原始错误
+    endProgress();
+    throw err; // 日志保留（doneChunks 已记），供下次续传
+  }
+  endProgress();
+  await removeJournal(jpath); // 成功 → 释放锁
+  return { bundleId, status };
+}
+
 export async function cmdPush(
   rt: Runtime,
   filePath: string,
@@ -253,6 +484,8 @@ export async function cmdPush(
     preview?: boolean;
     to?: string;
     recursive?: boolean;
+    force?: boolean;
+    concurrency?: number;
   },
 ): Promise<string> {
   const st = await stat(filePath);
@@ -262,53 +495,21 @@ export async function cmdPush(
   }
   if (!st.isFile()) throw new BizhouError("INVALID_ARG", `不是文件：${filePath}`);
   const mk = await rt.resolveMk(opts);
-  const bundleId = generateBundleId();
-  const chunkSize = opts.noSplit
-    ? Math.max(st.size, 1)
-    : opts.chunk
-      ? parseSize(opts.chunk)
-      : DEFAULT_CHUNK_SIZE;
+  const contentKey = deriveContentKey(mk);
   const cloudDir = opts.to
     ? normalizeCloudPath(opts.to)
     : defaultUploadCloudDir(resolve(filePath), rt.fileRoot);
-  const backend = await makeBackend(rt, opts.local);
-  if (cloudDir !== "/") await backend.mkdir(cloudDir); // 目标目录不存在则建
-  const store = backend.bundleStore(bundleId, cloudDir);
-
-  let preview: { kind: "video" | "audio" | "image"; data: Buffer } | undefined;
-  if (opts.preview) {
-    const p = await generatePreview(filePath);
-    if (p) {
-      preview = p;
-      info(`已生成预览包（${p.kind}，${formatBytes(p.data.length)}）`);
-    } else {
-      warn("未生成预览（非媒体类型或 ffmpeg 不可用），继续上传原文件。");
-    }
-  }
-
-  info(`加密上传：${filePath}（${formatBytes(st.size)}）→ ${bundleId}`);
-  await packResource({
-    filePath,
-    fileSize: st.size,
-    mk,
-    bundleId,
-    createdAt: new Date().toISOString(),
-    chunkSize,
-    compression: opts.compress ? "gzip" : "none",
-    store,
-    name: opts.name ?? basename(filePath),
-    mtime: st.mtime.toISOString(),
-    preview,
-    onProgress: (e) => renderProgress("加密", e.bytesDone, e.bytesTotal),
-  });
-  endProgress();
-  ok(`已上传。资源 ID：${c.bold(bundleId)}`);
-  out(bundleId); // 完整 ID 输出到 stdout，便于脚本捕获（stderr 走进度/提示）
-  return bundleId;
+  const backend = await makeBackend(rt, opts.local, resolveUploadConcurrency(rt, opts.concurrency));
+  info(`加密上传：${filePath}（${formatBytes(st.size)}）→ ${cloudDir}`);
+  const r = await pushOneFile(rt, backend, mk, contentKey, resolve(filePath), cloudDir, opts);
+  if (r.status === "skipped-dup" || r.status === "locked") return r.bundleId;
+  ok(`已上传${r.status === "resumed" ? "（续传）" : ""}。资源 ID：${c.bold(r.bundleId)}`);
+  out(r.bundleId); // 完整 ID 输出到 stdout，便于脚本捕获（stderr 走进度/提示）
+  return r.bundleId;
 }
 
 /** 递归收集本地目录下所有文件的绝对路径（子目录深度不限）。 */
-async function walkLocalFiles(absDir: string): Promise<string[]> {
+export async function walkLocalFiles(absDir: string): Promise<string[]> {
   const result: string[] = [];
   const walk = async (dir: string): Promise<void> => {
     const entries = await readdir(dir, { withFileTypes: true });
@@ -322,20 +523,28 @@ async function walkLocalFiles(absDir: string): Promise<string[]> {
   return result;
 }
 
-/** `push -r`：把本地目录树逐文件 packResource 到镜像的云端子目录树下。 */
+/** `push -r`：把本地目录树逐文件复用 `pushOneFile` 打包上传到镜像的云端子目录树下（去重/续传/锁与单文件 push 一致）。 */
 async function cmdPushRecursive(
   rt: Runtime,
   dirPath: string,
-  opts: CommonOpts & { chunk?: string; compress?: boolean; noSplit?: boolean; to?: string },
+  opts: CommonOpts & {
+    chunk?: string;
+    compress?: boolean;
+    noSplit?: boolean;
+    to?: string;
+    force?: boolean;
+    concurrency?: number;
+  },
 ): Promise<string> {
   const mk = await rt.resolveMk(opts);
+  const contentKey = deriveContentKey(mk);
   const absDir = resolve(dirPath);
   // 目录本身的缺省镜像位置：取"目录当作一个条目"时的父级镜像，再把目录名接回去。
   const baseCloud = opts.to
     ? normalizeCloudPath(opts.to)
     : defaultUploadCloudDir(absDir + sep, rt.fileRoot);
   const rootCloud = joinCloudPath(baseCloud, basename(absDir));
-  const backend = await makeBackend(rt, opts.local);
+  const backend = await makeBackend(rt, opts.local, resolveUploadConcurrency(rt, opts.concurrency));
   if (rootCloud !== "/") await backend.mkdir(rootCloud);
 
   const files = await walkLocalFiles(absDir);
@@ -344,44 +553,157 @@ async function cmdPushRecursive(
     return rootCloud;
   }
 
+  let uploaded = 0;
+  let skipped = 0;
   for (const abs of files) {
     const rel = relative(absDir, abs);
     const relDir = dirname(rel);
     const cloudDir = relDir === "." ? rootCloud : joinCloudPath(rootCloud, relDir);
-    if (cloudDir !== "/") await backend.mkdir(cloudDir);
-    const st = await stat(abs);
-    const bundleId = generateBundleId();
-    const chunkSize = opts.noSplit
-      ? Math.max(st.size, 1)
-      : opts.chunk
-        ? parseSize(opts.chunk)
-        : DEFAULT_CHUNK_SIZE;
-    const store = backend.bundleStore(bundleId, cloudDir);
-    info(`加密上传：${abs}（${formatBytes(st.size)}）→ ${cloudDir}/${basename(abs)}`);
-    await packResource({
-      filePath: abs,
-      fileSize: st.size,
-      mk,
-      bundleId,
-      createdAt: new Date().toISOString(),
-      chunkSize,
-      compression: opts.compress ? "gzip" : "none",
-      store,
-      name: basename(abs),
-      mtime: st.mtime.toISOString(),
-      onProgress: (e) => renderProgress("加密", e.bytesDone, e.bytesTotal),
-    });
-    endProgress();
-    ok(`已上传：${rel} → ${bundleId}`);
+    info(`加密上传：${abs} → ${cloudDir}/${basename(abs)}`);
+    const r = await pushOneFile(rt, backend, mk, contentKey, abs, cloudDir, opts);
+    if (r.status === "skipped-dup") skipped++;
+    else if (r.status === "locked") {
+      /* 跳过，不计入上传 */
+    } else uploaded++;
+    if (r.status === "uploaded" || r.status === "resumed") ok(`已上传：${rel} → ${r.bundleId}`);
   }
-  ok(`整树上传完成，共 ${files.length} 个文件 → ${rootCloud}`);
+  ok(
+    `整树完成：上传 ${uploaded}，跳过（已存在）${skipped}，共 ${files.length} 个文件 → ${rootCloud}`,
+  );
   return rootCloud;
+}
+
+/** 在飞锁 TTL：同上传，防误判刚启动的并发/长下载。 */
+const DOWNLOAD_LOCK_TTL_MS = 30 * 60 * 1000;
+
+/** 下载日志键：新 bundle 用 contentId，旧 bundle（无 contentId）退回 bundleId。 */
+function downloadJournalKey(contentId: string | undefined, bundleId: string): string {
+  return contentId && contentId.length > 0 ? contentId : bundleId;
+}
+
+async function fileExists(p: string): Promise<boolean> {
+  try {
+    await stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export interface PullOneOpts {
+  force?: boolean;
+}
+
+export interface PullOneResult {
+  status: "restored" | "skipped-dup" | "locked" | "resumed";
+  bytesWritten: number;
+}
+
+/** 单 bundle 下载内核：幂等→锁/续传→解密到 .part→端到端校验→原子改名。cmdPull 与 pull -r 共用。 */
+export async function pullOneBundle(
+  rt: Runtime,
+  backend: Backend,
+  mk: Buffer,
+  contentKey: Buffer,
+  fullId: string,
+  dir: string,
+  outPath: string,
+  opts: PullOneOpts,
+): Promise<PullOneResult> {
+  const store = backend.bundleStore(fullId, dir);
+  const { manifest, meta } = await readResourceMeta(mk, store);
+  const cid = meta.contentId; // 可能 undefined（旧 bundle）
+  const jkey = downloadJournalKey(cid, fullId);
+  const jpath = journalPath(rt.paths.dir, "download", jkey, outPath);
+  const partPath = `${outPath}.part`;
+
+  // 1. 幂等：目标已存在且内容相同 → 跳过（仅当有 contentId 可比对）
+  if (!opts.force && cid && (await fileExists(outPath))) {
+    if ((await hashPlaintextFile(outPath, contentKey)) === cid) {
+      warn(`目标已有相同文件，跳过：${outPath}`);
+      return { status: "skipped-dup", bytesWritten: 0 };
+    }
+  }
+
+  // 2. 查下载日志：锁 or 续传 or 新建
+  const existing = await readJournal(jpath);
+  let skip: number[] = [];
+  let status: "restored" | "resumed" = "restored";
+  if (existing) {
+    const alive = isLockAlive(existing, {
+      ttlMs: DOWNLOAD_LOCK_TTL_MS,
+      now: rt.now(),
+      pidAlive: pidAlive(existing.pid),
+    });
+    if (alive && !opts.force) {
+      warn(`同文件正在下载，本次跳过：${outPath}`);
+      return { status: "locked", bytesWritten: 0 };
+    }
+    // 崩溃残留（或 --force）→ 续传，但仅当 .part 仍在；否则从头
+    if (await fileExists(partPath)) {
+      skip = existing.doneChunks;
+      status = "resumed";
+    }
+  }
+
+  await mkdir(dirname(outPath), { recursive: true });
+
+  // 3. 写日志（上锁）
+  await writeJournal(jpath, {
+    bundleId: fullId,
+    cloudDir: dir,
+    contentId: cid ?? "",
+    doneChunks: skip,
+    totalChunks: manifest.chunks.length,
+    startedAt: new Date(rt.now()).toISOString(),
+    pid: process.pid,
+  });
+
+  // 4. 解密到 .part；每片写完把 seq 追加进日志（串行链，err-on-safe：日志滞后只会重下，绝不跳缺片）
+  let chain: Promise<void> = Promise.resolve();
+  let bytesWritten = 0;
+  try {
+    const res = await unpackResource({
+      mk,
+      store,
+      outPath: partPath,
+      skip,
+      onProgress: (e) => {
+        renderProgress("解密", e.bytesDone, e.bytesTotal);
+        chain = chain.then(() => appendDoneChunk(jpath, e.seq));
+      },
+    });
+    bytesWritten = res.bytesWritten;
+    await chain; // 确保进度落盘日志
+  } catch (err) {
+    endProgress();
+    await chain.catch(() => {});
+    throw err; // .part 与日志保留，供续传
+  }
+  endProgress();
+
+  // 5. 端到端校验（有 contentId 才做）：装配文件必须字节等于上传物
+  if (cid) {
+    const got = await hashPlaintextFile(partPath, contentKey);
+    if (got !== cid) {
+      throw new BizhouError(
+        "CHUNK",
+        `下载文件 contentId 校验失败（数据不完整或损坏），未交付：${outPath}`,
+      );
+      // 注意：不 removeJournal、不 rename → 保留 .part 与日志供重试
+    }
+  }
+
+  // 6. 原子改名落地 + 释放锁
+  await rename(partPath, outPath);
+  await removeJournal(jpath);
+  return { status, bytesWritten };
 }
 
 export async function cmdPull(
   rt: Runtime,
   id: string,
-  opts: CommonOpts & { out?: string; recursive?: boolean },
+  opts: CommonOpts & { out?: string; recursive?: boolean; force?: boolean },
 ): Promise<void> {
   const mk = await rt.resolveMk(opts);
   const backend = await makeBackend(rt, opts.local);
@@ -393,45 +715,46 @@ export async function cmdPull(
       info(`（空）云端目录下无资源：${startDir}`);
       return;
     }
+    const contentKey = deriveContentKey(mk);
+    let restored = 0;
+    let skipped = 0;
     for (const b of bundles) {
-      const store = backend.bundleStore(b.id, b.dir);
-      const { meta } = await readResourceMeta(mk, store);
+      const { meta } = await readResourceMeta(mk, backend.bundleStore(b.id, b.dir));
       const outPath = downloadLocalPath(rt.fileRoot, b.dir, meta.name);
-      await mkdir(dirname(outPath), { recursive: true });
       info(`下载还原：${b.id} → ${outPath}（${formatBytes(meta.size)}）`);
-      const res = await unpackResource({
-        mk,
-        store,
-        outPath,
-        onProgress: (e) => renderProgress("解密", e.bytesDone, e.bytesTotal),
-      });
-      endProgress();
-      ok(`已还原 ${formatBytes(res.bytesWritten)} → ${outPath}`);
+      const r = await pullOneBundle(rt, backend, mk, contentKey, b.id, b.dir, outPath, opts);
+      if (r.status === "skipped-dup") skipped++;
+      else if (r.status === "locked") {
+        /* 跳过，不计 */
+      } else {
+        restored++;
+        ok(
+          `已还原${r.status === "resumed" ? "（续传）" : ""} ${formatBytes(r.bytesWritten)} → ${outPath}`,
+        );
+      }
     }
-    ok(`整树还原完成，共 ${bundles.length} 个文件 → ${rt.fileRoot}`);
+    ok(
+      `整树还原完成：还原 ${restored}，跳过（已存在）${skipped}，共 ${bundles.length} 个 → ${rt.fileRoot}`,
+    );
     return;
   }
 
   const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
-  const store = backend.bundleStore(fullId, dir);
-  const { meta } = await readResourceMeta(mk, store);
+  const { meta } = await readResourceMeta(mk, backend.bundleStore(fullId, dir));
   // 两个分支都经 downloadLocalPath（会 normalize 目录段、拒绝 '..'，并 basename 净化 name），
   // 杜绝 --out 或 meta.name 里的 ../ 逃逸文件根。--out 给定时用它作落点子目录，否则用 bundle 云端目录。
   const outPath = downloadLocalPath(rt.fileRoot, opts.out ?? dir, meta.name);
-  await mkdir(dirname(outPath), { recursive: true });
+  const contentKey = deriveContentKey(mk);
   info(`下载还原：${fullId} → ${outPath}（${formatBytes(meta.size)}）`);
-  const res = await unpackResource({
-    mk,
-    store,
-    outPath,
-    onProgress: (e) => renderProgress("解密", e.bytesDone, e.bytesTotal),
-  });
-  endProgress();
-  ok(`已还原 ${formatBytes(res.bytesWritten)} → ${outPath}`);
+  const r = await pullOneBundle(rt, backend, mk, contentKey, fullId, dir, outPath, opts);
+  if (r.status === "skipped-dup" || r.status === "locked") return;
+  ok(
+    `已还原${r.status === "resumed" ? "（续传）" : ""} ${formatBytes(r.bytesWritten)} → ${outPath}`,
+  );
 }
 
 /** 递归列出某云端目录子树下所有 bundle 的 `{id, dir}`。 */
-async function walkBundlesUnder(
+export async function walkBundlesUnder(
   backend: Backend,
   startDir: string,
 ): Promise<{ id: string; dir: string }[]> {
@@ -578,6 +901,7 @@ export async function cmdRm(
     throw new BizhouError("INVALID_ARG", `删除目录 ${path} 及其内容将进回收站，请加 --yes 确认`);
   }
   await backend.trashPath(path, new Date().toISOString());
+  if (isBundle) await invalidateManifest(rt.paths.dir, b.id);
   ok(`已删除到回收站：${isBundle ? b.id : path}`);
 }
 
@@ -607,12 +931,19 @@ export async function cmdTrash(
   }
   if (sub === "rm") {
     if (!arg) throw new BizhouError("INVALID_ARG", "用法：bz trash rm <entryId>");
+    const entries = await backend.listTrash();
+    const entry = entries.find((e) => e.entryId === arg);
     await backend.deleteTrash(arg);
+    if (entry?.name.endsWith(BUNDLE_SUFFIX)) {
+      await invalidateManifest(rt.paths.dir, entry.name.slice(0, -BUNDLE_SUFFIX.length));
+    }
     ok(`已从回收站永久删除：${arg}`);
     return;
   }
   if (sub === "clear") {
     await backend.clearTrash();
+    // clear 时涉及的 bundleId 不易逐一枚举：直接清空整个 manifest 缓存目录（简单且安全，最坏情况只是下次重新拉取）。
+    await rm(join(rt.paths.dir, ".cache", "manifests"), { recursive: true, force: true });
     ok("回收站已清空");
     return;
   }
@@ -667,6 +998,7 @@ export async function cmdRename(
     const mk = await rt.resolveMk(opts);
     const bundleStore = backend.bundleStore(b.id, b.dir);
     await renameResource(mk, bundleStore, newName);
+    await invalidateManifest(rt.paths.dir, b.id); // 改名改了 encMeta，须失效缓存
     ok(`已改名 ${b.id} → ${newName}`);
     return;
   }

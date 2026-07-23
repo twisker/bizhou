@@ -152,7 +152,52 @@
 
 ---
 
-## Phase 3 — 打磨与生态（远期，待细化）
+## Phase 3 — 打磨与生态
 
 > **范围：本项目只做 CLI 相关（不做 GUI 前端、不做移动端）。**
-> 候选：shell 补全、更多预览类型、daemon/定时备份、进 homebrew-core / winget、worker_threads 并行加密。
+> 候选池：shell 补全、更多预览类型、daemon/定时备份、进 homebrew-core / winget、worker_threads 并行加密。
+> **子项各自 spec→plan→执行。已澄清并定型的子项在下方按 Sprint 拆分。**
+
+### Phase 3 · S1 — 健壮上传（并发 + 续传 + 幂等） ✅ **完成（2026-07-23）**
+
+> 设计：`docs/superpowers/specs/2026-07-23-robust-upload-download-design.md`
+> 计划：`docs/superpowers/plans/2026-07-23-robust-upload-s1.md`（含各任务完整 TDD 步骤与代码）
+> 来源：候选「worker_threads 并行加密/上传」经澄清——真正杠杆是**上传并发（async I/O，不引 worker_threads）**，并顺带补齐续传接线与内容级幂等。
+
+**目标：** `bz push` 具备片内 4MB 并发上传、中断续传、内容级幂等（去重跳过 + 在飞锁），manifest 本地缓存消除去重扫描的重复网络拉取。
+
+**执行方式：** 子代理驱动开发（每任务 实现子代理 TDD + 评审子代理），完成后整分支评审，交人工按 git flow 合并。
+
+| 任务 | 说明 | 责任人 | 状态 |
+|-----|------|--------|------|
+| S1-T1 | `contentId` 内容身份底座：HKDF(MK) 派生 + HMAC(明文)，存加密 encMeta；`ResourceMeta`/`PackOptions` 接线；`info` 显示 | AI | ✅ 已完成 |
+| S1-T2 | `uploadPart` 4MB 分片限流池并发（默认 4，clamp[1,16]）+ AbortController fail-fast；`withRetry`/`uploadSlice` 支持 signal | AI | ✅ 已完成 |
+| S1-T3 | 上传日志模块（`journal/`）：一份 JSON 兼作 在飞锁 + 续传状态；核心不读时钟（now/pid 注入） | AI | ✅ 已完成 |
+| S1-T4 | manifest 缓存模块（`cache/`，只存加密态）+ `rename`/`rm`/`trash` 失效钩子 | AI | ✅ 已完成 |
+| S1-T5 | `cmdPush` 集成：预哈希→去重（走缓存）→锁/续传→`--force`/`--concurrency`→消息；抽出共用 `pushOneFile` | AI | ✅ 已完成（2026-07-23） |
+| S1-T6 | `push -r` 递归复用 `pushOneFile`，整树去重/续传/锁一致 | AI | ✅ 已完成 |
+
+**验收（达成）：** `bun test` **155 全绿 + 1 skip**；typecheck/lint/build(3) 全过。每任务子代理实现 + 评审，opus 整分支最终评审 **✅ Ready to merge**。
+**评审拦下的关键缺陷（均已修 + 补测）：**
+- **2 个 Critical crypto（T5）：** ①resume 重新生成 DEK → 续传出的 bundle 永不可解（修：journal 存 MK 包裹的 DEK，续传复用）；②确定性 chunk-IV 未固定 chunkSize/compression → 换 `--chunk`/`--compress` 续传即 **AES-GCM nonce 复用**（修：journal 固定 chunkSize+compression，续传强制沿用；tech-spec §5.1.1 记录 IV 方案与唯一性不变式）。
+- **Important：** journal 全字段形状校验（T3）；首推新云端目录 `listDir` 先于 `mkdir` → 百度后端抛错（T6/F1，修：`pushOneFile` 先 mkdir 再去重扫描 + strict-listDir 回归测试）。
+**安全红线自检通过：** contentId 仅入加密 encMeta（云端零泄露）；journal/cache 无明文密钥（journal 存 MK 包裹 DEK）；缓存键 `assertNameSegment` 防穿越、且 bundleId 不可变 → 陈旧缓存永不致错误去重；GCM 失败即抛不静默。
+**新增模块/测试：** `@bizhou/core` → `content`/`journal`/`cache`；测试 `content`/`journal`/`cache`/`upload-concurrency`/`push-idempotency`/`push-recursive-idempotency` + 内存后端夹具。
+
+### Phase 3 · S2 — 健壮下载（幂等 + 在飞锁 + 分片续传 + 原子落地） ✅ **完成（2026-07-24）**
+
+> 设计：`docs/superpowers/specs/2026-07-23-robust-upload-download-design.md`（S2 段）
+> 计划：`docs/superpowers/plans/2026-07-23-robust-download-s2.md`（含各任务完整 TDD 步骤与代码）
+> 复用 S1 的 `content`/`journal`/`cache` 底座。执行方式：子代理驱动（同 S1）。
+
+| 任务 | 说明 | 责任人 | 状态 |
+|-----|------|--------|------|
+| S2-T1 | 核心续传：`decryptChunksToFile` 支持 `skip`（定位写入 + 收尾 truncate）+ `UnpackOptions.skip` 透传；`journal` 上传专属字段（wrappedKey/chunkSize/compression）改可选（下载复用） | AI | ✅ 已完成 |
+| S2-T2 | `cmdPull` 集成：幂等（目标 hash==contentId 跳过）→在飞锁→解密到 `.part`→**端到端 contentId 校验**→原子改名落地→`--force`；抽出共用 `pullOneBundle` | AI | ✅ 已完成 |
+| S2-T3 | `pull -r` 递归复用 `pullOneBundle`，整树幂等/续传/锁一致 | AI | ✅ 已完成 |
+
+**验收目标：** 下载往返字节一致；幂等跳过/在飞锁/分片续传/端到端校验各有集成测试；`bun test` 全量无回归；typecheck/lint/build 全过。**续传正确性双保险：** 逐片密文 sha256（下载即校验）+ 装配后端到端 contentId（防日志/flush 竞态跳过实际缺失片）；无 contentId 的旧 bundle 退化为仅前者。**红线：** 端到端校验不过绝不 rename 交付、绝不静默写损坏。
+
+### Phase 3 · 其余候选（待细化）
+
+> shell 补全、更多预览类型、daemon/定时备份、进 homebrew-core / winget、worker_threads 并行加密（网络场景零收益，仅 gzip/纯本地备份时再评估）。各自 spec→plan→执行。

@@ -5,6 +5,7 @@ import {
   aeadDecrypt,
   aeadEncrypt,
   DEFAULT_SCRYPT,
+  deriveDeterministicIv,
   deriveKey,
   generateKey,
   generateSalt,
@@ -82,6 +83,33 @@ describe("AEAD (AES-256-GCM)", () => {
 
   test("错误长度密钥 → 抛 CryptoError", () => {
     expect(() => aeadEncrypt(Buffer.alloc(16), Buffer.from("x"))).toThrow(CryptoError);
+  });
+});
+
+describe("deriveDeterministicIv（确定性分片 IV）", () => {
+  test("确定性：同 key + 同 context → 同一 IV", () => {
+    const key = generateKey();
+    const ctx = Buffer.from("bundle-abc:3", "utf8");
+    expect(deriveDeterministicIv(key, ctx).equals(deriveDeterministicIv(key, ctx))).toBe(true);
+  });
+
+  test("长度恒为 12 字节（GCM 96-bit IV）", () => {
+    expect(deriveDeterministicIv(generateKey(), Buffer.from("x")).length).toBe(IV_BYTES);
+  });
+
+  test("按 seq 唯一：同 key 不同 context（seq） → 不同 IV", () => {
+    const key = generateKey();
+    const iv0 = deriveDeterministicIv(key, Buffer.from("b:0", "utf8"));
+    const iv1 = deriveDeterministicIv(key, Buffer.from("b:1", "utf8"));
+    const iv2 = deriveDeterministicIv(key, Buffer.from("b:2", "utf8"));
+    expect(iv0.equals(iv1)).toBe(false);
+    expect(iv1.equals(iv2)).toBe(false);
+    expect(iv0.equals(iv2)).toBe(false);
+  });
+
+  test("跨 DEK 差异：不同 key + 同 context → 不同 IV", () => {
+    const ctx = Buffer.from("b:0", "utf8");
+    expect(deriveDeterministicIv(generateKey(), ctx).equals(deriveDeterministicIv(generateKey(), ctx))).toBe(false);
   });
 });
 

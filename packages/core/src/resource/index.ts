@@ -32,6 +32,12 @@ export interface PackOptions {
   readonly fileSize: number;
   /** MK：由 vault 解锁得到。 */
   readonly mk: Buffer;
+  /**
+   * 可选注入的 DEK：续传（resume）时必须传入与首次相同的 DEK，
+   * 否则已上传分片是旧 DEK 的密文、新 manifest 却用新 DEK 封装，
+   * 会导致整个 bundle 不可解（sha256/GCM 校验失败）。不传则新建随机 DEK。
+   */
+  readonly dek?: Buffer;
   readonly bundleId: string;
   readonly createdAt: string;
   readonly chunkSize?: number;
@@ -41,6 +47,7 @@ export interface PackOptions {
   readonly name?: string;
   readonly mtime?: string;
   readonly contentType?: string;
+  readonly contentId?: string;
   readonly onProgress?: ProgressCallback;
   readonly skipExisting?: readonly number[];
   /** 可选预览包（由 CLI/前端用 ffmpeg 等生成后传入；核心库只负责加密与存储）。 */
@@ -51,7 +58,7 @@ export interface PackOptions {
 export async function packResource(opts: PackOptions): Promise<Manifest> {
   const chunkSize = opts.chunkSize ?? DEFAULT_CHUNK_SIZE;
   const compression = opts.compression ?? "none";
-  const dek = generateKey();
+  const dek = opts.dek ?? generateKey();
 
   const chunks = await encryptFileToChunks({
     filePath: opts.filePath,
@@ -70,6 +77,7 @@ export async function packResource(opts: PackOptions): Promise<Manifest> {
     size: opts.fileSize,
     ...(opts.mtime ? { mtime: opts.mtime } : {}),
     ...(opts.contentType ? { contentType: opts.contentType } : {}),
+    ...(opts.contentId ? { contentId: opts.contentId } : {}),
   };
 
   let previewInfo: Manifest["preview"];
@@ -124,6 +132,8 @@ export interface UnpackOptions {
   readonly mk: Buffer;
   readonly store: BundleStore;
   readonly outPath: string;
+  /** 续传：这些 seq 已写入 outPath，跳过下载/解密，仅推进写入偏移。 */
+  readonly skip?: readonly number[];
   readonly onProgress?: ProgressCallback;
 }
 
@@ -145,6 +155,7 @@ export async function unpackResource(opts: UnpackOptions): Promise<UnpackResult>
     compression: manifest.compression,
     store: opts.store,
     outPath: opts.outPath,
+    skip: opts.skip,
     onProgress: opts.onProgress,
   });
   return { manifest, meta, bytesWritten };

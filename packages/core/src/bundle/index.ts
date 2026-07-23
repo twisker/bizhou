@@ -47,6 +47,7 @@ export interface ResourceMeta {
   readonly size: number; // 原始明文总字节数
   readonly mtime?: string; // ISO8601，可选
   readonly contentType?: string;
+  readonly contentId?: string; // 明文内容指纹（HMAC，仅存加密 encMeta）
 }
 
 export interface Manifest {

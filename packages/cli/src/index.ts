@@ -52,8 +52,9 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
   account [list|use <n>|add <n>]               多账号管理
 
 资源:
-  push <path> [-r] [--chunk 100MB] [--compress] [--no-split] [--name <n>] [--preview] [--to <云端目录>]
-  pull <id|云端目录> [-r] [--out <dir>]   还原到文件根下（--out 为文件根内子目录，默认按云端结构镜像）
+  push <path> [-r] [--chunk 100MB] [--compress] [--no-split] [--name <n>] [--preview] [--to <云端目录>] [--force] [--concurrency N]
+                          （--force 无视去重/在飞锁强制上传；--concurrency 片内并发数，默认 4，范围 1-16）
+  pull <id|云端目录> [-r] [--out <dir>] [--force]   还原到文件根下（--force 无视幂等/在飞锁强制下载）
   mkdir <目录>             创建云端目录（mkdir -p 语义）
   ls [目录] [-r]           列出目录（显示真名，需已解锁；-r 递归）
   info <id>                查看资源元数据
@@ -112,6 +113,7 @@ async function main(argv: string[]): Promise<number> {
       recursive: { type: "boolean", short: "r" },
       to: { type: "string" },
       yes: { type: "boolean" },
+      concurrency: { type: "string" },
     },
   });
 
@@ -171,6 +173,8 @@ async function main(argv: string[]): Promise<number> {
         preview: Boolean(values.preview),
         to: values.to as string | undefined,
         recursive: Boolean(values.recursive),
+        force: Boolean(values.force),
+        concurrency: values.concurrency ? Number(values.concurrency) : undefined,
       });
       return 0;
     case "pull":
@@ -179,6 +183,7 @@ async function main(argv: string[]): Promise<number> {
         ...common,
         out: values.out as string | undefined,
         recursive: Boolean(values.recursive),
+        force: Boolean(values.force),
       });
       return 0;
     case "mkdir":

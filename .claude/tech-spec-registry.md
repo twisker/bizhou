@@ -112,6 +112,23 @@
 - **分片 AAD**：每分片以 `bundleId:seq` 作为 GCM AAD，绑定密文位置，防跨资源/乱序移花接木。
 - **token 存储**：设备密钥（首次随机、0600）AES-256-GCM 加密 `secrets.enc`（`FileSecretStore`）；OS 钥匙串后端可实现同接口后替换。
 
+### 5.1.1 确定性分片 IV（断点续传所需，安全红线留痕）
+
+为使断点续传中"跳过重传的分片"其 manifest 记录（iv/tag/sha256）与云端已存密文**逐字节一致**，分片 IV 由 DEK 确定性派生，而非随机：
+
+```
+IV = HMAC-SHA256(DEK, "<bundleId>:<seq>")[:12]   // 即 deriveDeterministicIv(dek, chunkAad(bundleId, seq))
+```
+
+- **实现**：`packages/core/src/crypto/deriveDeterministicIv` + `chunker/encryptFileToChunks`。IV 用 DEK 自身作 HMAC 密钥（密钥分离可选，当前未拆分子密钥；IV 无需保密、只需唯一）。
+- **唯一性不变量（GCM 铁律：绝不用同一 `(key, IV)` 加密不同明文）**：
+  1. `key = DEK`，每个新 bundle 由 CSPRNG 随机生成，互不相同；
+  2. `aad = "bundleId:seq"`，同一 bundle 内每分片唯一 → 同一 DEK 下每个 seq 的 IV 唯一；
+  3. **续传时 DEK、bundleId、chunkSize、compression 全部从 journal 固定还原**（`JournalEntry` 新增 `chunkSize`/`compression`，`pushOneFile` 续传路径忽略本次不同的 `--chunk/--no-split/--compress` 并 `warn`）→ `seq→明文` 映射与首次完全一致，重加密逐字节可复现。
+- **唯一可能的 `(key, IV)` 重复**仅出现在"续传重算同一 seq"，而此时明文必然与首次相同（由 1、3 保证），属幂等重算，**不是 nonce 复用**。
+- **历史漏洞（已闭合）**：曾仅凭 `contentId`（文件内容指纹）判定"文件未变"就认为 IV 安全，但 `seq→明文` 还取决于 chunkSize 与 compression——续传改用不同 `--chunk/--no-split/--compress` 会让同一 `(DEK, bundleId, seq)` 覆盖**不同明文** → 灾难性 AES-GCM nonce 复用（机密性击穿 + GHASH/tag 伪造）。修复：把 chunkSize/compression 一并钉进 journal 并在续传时强制沿用。
+- **manifest schema 不变**：IV 照旧逐分片存于 `manifest.chunks[].iv`。解密只读 manifest 里的 IV，与派生方式无关，故**老 bundle 照常解密**、无迁移成本。
+
 ## 6. 性能与安全要求
 
 | 要求 | 说明 |

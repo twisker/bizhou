@@ -10,6 +10,7 @@
 import {
   createCipheriv,
   createDecipheriv,
+  createHmac,
   randomBytes,
   type ScryptOptions,
   scrypt as scryptCallback,
@@ -68,15 +69,44 @@ function assertKey(key: Buffer): void {
   }
 }
 
-/** 用 AES-256-GCM 加密。可选 AAD（附加认证数据，参与完整性校验但不加密）。 */
-export function aeadEncrypt(key: Buffer, plaintext: Buffer, aad?: Buffer): AeadResult {
+/**
+ * 由 key 与一段唯一上下文（如 chunkAad = bundleId||seq）确定性派生 12B GCM IV。
+ *
+ * 用途：断点续传要求"跳过重传的分片"其 manifest 记录（iv/tag/sha256）必须与云端已存密文
+ * 逐字节一致。随机 IV 会让续传时重新加密同一分片得到不同密文，与已上传密文不符 → pull 校验失败。
+ * 以 HMAC-SHA256(key, context) 截断为 IV，使"同 key + 同上下文 + 同明文"必得同一密文。
+ *
+ * 安全不变量（GCM 要求：绝不用同一 (key, IV) 加密不同明文）：
+ *  (a) key=DEK，每个新 bundle 由 CSPRNG 随机生成，互不相同；
+ *  (b) aad = "bundleId:seq"，同一 bundle 内每个分片唯一 → 同一 DEK 下每个 seq 的 IV 唯一；
+ *  (c) 续传时 DEK、bundleId、chunkSize、compression 全部从 journal 固定还原（见
+ *      JournalEntry 与 pushOneFile），故 seq→明文的映射与首次完全一致，重加密逐字节可复现。
+ * 三者合起来：唯一可能重复的 (key, IV) 组合只出现在"续传重算同一 seq"这一情形，而此时明文
+ * 必然与首次相同（(a)(c) 保证），属同一 (key, IV, 明文) 的幂等重算，不是 nonce 复用。
+ *
+ * 反例警示（历史漏洞）：若续传时改用不同的 chunkSize 或 compression，则同一 seq 覆盖不同明文，
+ * (key, IV) 相同而明文不同 → 灾难性 nonce 复用（机密性击穿 + GHASH/tag 伪造）。故上述 (c) 的
+ * chunkSize/compression 固定是本方案安全的前提，绝不可仅凭 contentId 判定"文件未变"而放松。
+ * IV 无需保密，唯一即可。
+ */
+export function deriveDeterministicIv(key: Buffer, context: Buffer): Buffer {
+  return createHmac("sha256", key).update(context).digest().subarray(0, IV_BYTES);
+}
+
+/**
+ * 用 AES-256-GCM 加密。可选 AAD（附加认证数据，参与完整性校验但不加密）。
+ * 可选 iv：不传则用 CSPRNG 随机 IV；传入（须 12B）则用确定性 IV（供续传逐字节复现，见
+ * `deriveDeterministicIv`）。调用方须自行保证 (key, iv) 唯一。
+ */
+export function aeadEncrypt(key: Buffer, plaintext: Buffer, aad?: Buffer, iv?: Buffer): AeadResult {
   assertKey(key);
-  const iv = randomBytes(IV_BYTES);
-  const cipher = createCipheriv(CIPHER_ALGO, key, iv, { authTagLength: TAG_BYTES });
+  if (iv && iv.length !== IV_BYTES) throw new CryptoError(`IV 长度必须为 ${IV_BYTES} 字节`);
+  const nonce = iv ?? randomBytes(IV_BYTES);
+  const cipher = createCipheriv(CIPHER_ALGO, key, nonce, { authTagLength: TAG_BYTES });
   if (aad) cipher.setAAD(aad);
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return { iv, ciphertext, tag };
+  return { iv: nonce, ciphertext, tag };
 }
 
 /**

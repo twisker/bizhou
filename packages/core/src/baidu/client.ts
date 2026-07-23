@@ -27,6 +27,7 @@ export interface HttpRequestInit {
   method?: string;
   headers?: Record<string, string>;
   body?: Buffer | string | FormData;
+  signal?: AbortSignal;
 }
 
 export type HttpClient = (input: string, init?: HttpRequestInit) => Promise<HttpResponse>;
@@ -57,16 +58,23 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  */
 export async function withRetry<T>(
   fn: () => Promise<T>,
-  opts: { tries?: number; baseMs?: number; onRetry?: (attempt: number, err: unknown) => void } = {},
+  opts: {
+    tries?: number;
+    baseMs?: number;
+    onRetry?: (attempt: number, err: unknown) => void;
+    signal?: AbortSignal;
+  } = {},
 ): Promise<T> {
   const tries = opts.tries ?? 3;
   const baseMs = opts.baseMs ?? 500;
   let lastErr: unknown;
   for (let i = 0; i < tries; i++) {
+    if (opts.signal?.aborted) throw lastErr ?? new BizhouError("BAIDU", "上传已取消");
     try {
       return await fn();
     } catch (err) {
       lastErr = err;
+      if (opts.signal?.aborted) throw err; // 已取消：不再退避重试
       if (i < tries - 1) {
         opts.onRetry?.(i + 1, err);
         await sleep(baseMs * 2 ** i);
@@ -98,14 +106,16 @@ function form(params: Record<string, string>): string {
 
 export class BaiduClient {
   private readonly maxRetries: number;
+  private readonly uploadConcurrency: number;
 
   constructor(
     readonly _config: OAuthConfig,
     private accessToken: string,
     private readonly http: HttpClient,
-    opts: { maxRetries?: number } = {},
+    opts: { maxRetries?: number; uploadConcurrency?: number } = {},
   ) {
     this.maxRetries = opts.maxRetries ?? 3;
+    this.uploadConcurrency = Math.min(16, Math.max(1, opts.uploadConcurrency ?? 4));
   }
 
   setAccessToken(token: string): void {
@@ -160,6 +170,7 @@ export class BaiduClient {
     uploadid: string,
     partseq: number,
     slice: Buffer,
+    signal?: AbortSignal,
   ): Promise<string> {
     const url = `${PCS_SUPERFILE}?${form({
       method: "upload",
@@ -171,7 +182,7 @@ export class BaiduClient {
     })}`;
     const fd = new FormData();
     fd.append("file", new Blob([new Uint8Array(slice)]), "part");
-    const res = await this.http(url, { method: "POST", body: fd });
+    const res = await this.http(url, { method: "POST", body: fd, signal });
     const data = (await res.json()) as Record<string, unknown>;
     if (typeof data.md5 !== "string") {
       throw new BizhouError("BAIDU", `superfile2 分片 ${partseq} 未返回 md5`);
@@ -213,16 +224,33 @@ export class BaiduClient {
     const slices = sliceTransfer(data);
     const blockMd5 = slices.map(md5hex);
     const { uploadid, blocksToUpload } = await this.precreate(path, data.length, blockMd5);
-    // precreate 返回的 blocksToUpload 即"仍需上传的分片索引"：
-    // 只上传其中的分片（断点续传 / 秒传时可能为空 → 一片都不传，直接 create）。
-    const need = new Set(blocksToUpload);
-    for (let i = 0; i < slices.length; i++) {
-      if (!need.has(i)) continue;
-      // 瞬时失败重试：单片偶发超时不中断整份大文件（幂等：同 partseq+uploadid 可重传）。
-      await withRetry(() => this.uploadSlice(path, uploadid, i, slices[i]!), {
-        tries: this.maxRetries,
-      });
-      onSlice?.(i, slices.length);
+    // 仅上传仍需的分片（断点续传 / 秒传时可能为空）。
+    const need = blocksToUpload.filter((i) => i >= 0 && i < slices.length);
+    const total = slices.length;
+
+    const ac = new AbortController();
+    let nextK = 0;
+    const worker = async (): Promise<void> => {
+      while (true) {
+        if (ac.signal.aborted) return;
+        const k = nextK++;
+        if (k >= need.length) return;
+        const i = need[k]!;
+        // 单片幂等：同 partseq+uploadid 可重传；aborted 时 withRetry 不再重试。
+        await withRetry(() => this.uploadSlice(path, uploadid, i, slices[i]!, ac.signal), {
+          tries: this.maxRetries,
+          signal: ac.signal,
+        });
+        onSlice?.(i, total);
+      }
+    };
+
+    const poolN = Math.min(this.uploadConcurrency, Math.max(1, need.length));
+    try {
+      await Promise.all(Array.from({ length: poolN }, () => worker()));
+    } catch (err) {
+      ac.abort(); // fail-fast：取消在飞分片
+      throw err; // 不调 create，逻辑分片视为未完成
     }
     return this.create(path, data.length, uploadid, blockMd5);
   }
