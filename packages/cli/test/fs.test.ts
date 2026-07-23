@@ -15,6 +15,7 @@ import {
   cmdRename,
   cmdRm,
   createRuntime,
+  resolveBundleOrNull,
 } from "../src/commands.ts";
 
 function sha256(b: Buffer): string {
@@ -248,6 +249,25 @@ describe("mv / cp / rename（本地后端）", () => {
     const rt = createRuntime();
     await cmdMkdir(rt, "/cpdir", { local: store });
     await expect(cmdCp(rt, "/cpdir", "/cpdir2", { local: store })).rejects.toThrow();
+  });
+
+  test("resolveBundleOrNull：真实 id 返回 bundle，明显不存在的 id 返回 null（而非吞掉歧义/后端错误）", async () => {
+    const rt = createRuntime();
+    const f = join(work, "解析我.bin");
+    await writeFile(f, Buffer.from("resolve-data"));
+    const id = await cmdPush(rt, f, { local: store, to: "/resolve", name: "解析我.bin" });
+
+    const found = await resolveBundleOrNull(rt, id, store);
+    expect(found).not.toBeNull();
+    expect(found?.id).toBe(id);
+
+    const absent = await resolveBundleOrNull(rt, "0".repeat(32), store);
+    expect(absent).toBeNull();
+  });
+
+  test("cmdMv：src 既非 bundle 又非已存在目录，应如实报错而不是被静默吞掉", async () => {
+    const rt = createRuntime();
+    await expect(cmdMv(rt, "/不存在的路径/xyz", "/mv-dst", { local: store })).rejects.toThrow();
   });
 });
 

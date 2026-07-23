@@ -447,13 +447,17 @@ async function walkBundlesUnder(
   return result;
 }
 
-/** 递归列出整棵云端树里所有 bundle 的 `{id, dir}`（从根 `/` 开始）。 */
+/**
+ * 递归列出整棵云端树里所有 bundle 的 `{id, dir}`（从根 `/` 开始）。
+ * `backend` 可选：调用方若已建好 backend，传入以避免重复 makeBackend（重复走 token 刷新）。
+ */
 async function listBundles(
   rt: Runtime,
   local: string | undefined,
+  backend?: Backend,
 ): Promise<{ id: string; dir: string }[]> {
-  const backend = await makeBackend(rt, local);
-  return walkBundlesUnder(backend, "/");
+  const b = backend ?? (await makeBackend(rt, local));
+  return walkBundlesUnder(b, "/");
 }
 
 /** 把用户给的 ID（可为 `bz ls` 显示的 12 位前缀）解析为完整 bundle，递归遍历子目录查找。 */
@@ -461,8 +465,9 @@ async function resolveBundle(
   rt: Runtime,
   idOrPrefix: string,
   local: string | undefined,
+  backend?: Backend,
 ): Promise<{ id: string; dir: string }> {
-  const bundles = await listBundles(rt, local);
+  const bundles = await listBundles(rt, local, backend);
   if (/^[0-9a-f]{32}$/.test(idOrPrefix)) {
     const found = bundles.find((b) => b.id === idOrPrefix);
     if (!found) throw new BizhouError("INVALID_ARG", `找不到资源：${idOrPrefix}`);
@@ -477,6 +482,31 @@ async function resolveBundle(
     );
   }
   return matches[0]!;
+}
+
+/**
+ * 解析 bundle：确实找不到→返回 null（供上层回退为目录路径）；歧义/后端错误→抛出（不吞）。
+ * 与 `resolveBundle` 的区别：后者对"找不到"也抛错，本函数只对"找不到"返回 null，
+ * 让 mv/cp/rename 能安全区分"当目录处理"与"歧义/网络错误应如实报错"两种情形。
+ */
+export async function resolveBundleOrNull(
+  rt: Runtime,
+  idOrPrefix: string,
+  local: string | undefined,
+  backend?: Backend,
+): Promise<{ id: string; dir: string } | null> {
+  const bundles = await listBundles(rt, local, backend); // 后端错误在此自然抛出（不被吞）
+  const full = /^[0-9a-f]{32}$/.test(idOrPrefix)
+    ? bundles.filter((b) => b.id === idOrPrefix)
+    : bundles.filter((b) => b.id.startsWith(idOrPrefix.toLowerCase()));
+  if (full.length === 0) return null; // 确实找不到
+  if (full.length > 1) {
+    throw new BizhouError(
+      "INVALID_ARG",
+      `ID 前缀 ${idOrPrefix} 不唯一（匹配 ${full.length} 个），请给更长前缀`,
+    );
+  }
+  return full[0]!;
 }
 
 export async function cmdMkdir(rt: Runtime, cloudDir: string, opts: CommonOpts): Promise<void> {
@@ -545,20 +575,6 @@ export async function cmdRm(rt: Runtime, id: string, opts: CommonOpts): Promise<
 
 // ---- mv / cp / rename ------------------------------------------------------
 
-/** 把 src 解析为云端路径：先当 bundle（id/12 位前缀）解析，失败则当目录路径处理。 */
-async function resolveSrcCloudPath(
-  rt: Runtime,
-  src: string,
-  local: string | undefined,
-): Promise<{ path: string; isBundle: boolean }> {
-  try {
-    const b = await resolveBundle(rt, src, local);
-    return { path: joinCloudPath(b.dir, bundleDirName(b.id)), isBundle: true };
-  } catch {
-    return { path: normalizeCloudPath(src), isBundle: false };
-  }
-}
-
 export async function cmdMv(
   rt: Runtime,
   src: string,
@@ -566,7 +582,8 @@ export async function cmdMv(
   opts: CommonOpts,
 ): Promise<void> {
   const backend = await makeBackend(rt, opts.local);
-  const { path: srcPath } = await resolveSrcCloudPath(rt, src, opts.local);
+  const b = await resolveBundleOrNull(rt, src, opts.local, backend);
+  const srcPath = b ? joinCloudPath(b.dir, bundleDirName(b.id)) : normalizeCloudPath(src);
   const dst = normalizeCloudPath(dstDir);
   await backend.mkdir(dst);
   await backend.move(srcPath, dst);
@@ -580,7 +597,9 @@ export async function cmdCp(
   opts: CommonOpts & { recursive?: boolean },
 ): Promise<void> {
   const backend = await makeBackend(rt, opts.local);
-  const { path: srcPath, isBundle } = await resolveSrcCloudPath(rt, src, opts.local);
+  const b = await resolveBundleOrNull(rt, src, opts.local, backend);
+  const isBundle = b !== null;
+  const srcPath = b ? joinCloudPath(b.dir, bundleDirName(b.id)) : normalizeCloudPath(src);
   if (!isBundle && !opts.recursive) {
     throw new BizhouError("INVALID_ARG", "复制目录需 -r");
   }
@@ -597,17 +616,12 @@ export async function cmdRename(
   opts: CommonOpts,
 ): Promise<void> {
   const backend = await makeBackend(rt, opts.local);
-  let bundle: { id: string; dir: string } | undefined;
-  try {
-    bundle = await resolveBundle(rt, src, opts.local);
-  } catch {
-    bundle = undefined;
-  }
-  if (bundle) {
+  const b = await resolveBundleOrNull(rt, src, opts.local, backend);
+  if (b) {
     const mk = await rt.resolveMk(opts);
-    const bundleStore = backend.bundleStore(bundle.id, bundle.dir);
+    const bundleStore = backend.bundleStore(b.id, b.dir);
     await renameResource(mk, bundleStore, newName);
-    ok(`已改名 ${bundle.id} → ${newName}`);
+    ok(`已改名 ${b.id} → ${newName}`);
     return;
   }
   const srcPath = normalizeCloudPath(src);
