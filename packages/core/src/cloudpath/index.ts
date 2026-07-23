@@ -3,9 +3,17 @@
  * 不碰 IO，供上传/下载映射与目录寻址复用。
  */
 
-/** 规范化：保证前导 "/"、折叠多重 "/"、去掉尾部 "/"（根保留 "/"）。 */
+import { InvalidArgError } from "../errors.ts";
+
+/**
+ * 规范化：保证前导 "/"、折叠多重 "/"、去掉尾部 "/"（根保留 "/"）。
+ * 丢弃 "." 段（当前目录，无害）；拒绝 ".." 段（防止路径穿越到根之外）。
+ */
 export function normalizeCloudPath(p: string): string {
-  const parts = p.split("/").filter((s) => s.length > 0);
+  const parts = p.split("/").filter((s) => s.length > 0 && s !== ".");
+  if (parts.includes("..")) {
+    throw new InvalidArgError(`云端路径不允许 '..' 段：${p}`);
+  }
   return parts.length === 0 ? "/" : `/${parts.join("/")}`;
 }
 

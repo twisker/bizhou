@@ -32,4 +32,9 @@ describe("LocalBackend", () => {
     const be = new LocalBackend(base);
     expect(await be.listDir("/不存在")).toEqual({ dirs: [], bundles: [] });
   });
+
+  test("mkdir 拒绝 '..' 路径穿越，无法在 baseDir 外创建目录", async () => {
+    const be = new LocalBackend(base);
+    await expect(be.mkdir("/../escape")).rejects.toThrow();
+  });
 });
