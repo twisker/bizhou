@@ -4,9 +4,10 @@
 
 ---
 
-## 当前测试结果（2026-07-23）
+## 当前测试结果（2026-07-24）
 
-- `bun test`：**147 项全绿 + 1 skip**（20 文件），`pnpm run typecheck` 双包通过，`biome check` 无 error。
+- `bun test`：**180 项全绿 + 1 skip**（29 文件），`pnpm run typecheck` 双包通过，`biome check` 无 error。
+- **D1（daemon/定时备份）新增覆盖**：`backup-cmd.test.ts`（`bz backup add/list/rm` 端到端，非目录/未知任务失败路径）、`sweep.test.ts`（`sweepJob` 幂等 walk+`pushOneFile`：首轮上传→二轮全跳过→改动文件只重传改动项→源目录不存在时安全跳过不抛）、`watcher.test.ts`（`debounce`/`listDirsRecursive` 纯逻辑；`watchRecursive` 真实 fs.watch 事件触发 + `stop()` 后不再触发）、`serial-runner.test.ts`（`SerialJobRunner`：空闲 `trigger()` 立即跑一次；运行中的多次 `trigger()` 合并为一次补跑且 `maxConcurrent===1`）。`sweepJob`/`cmdBackup`/`SerialJobRunner` 均离线（内存后端/本地临时目录），不联网。
 - **S1-T5 新增覆盖**（`packages/cli/test/push-idempotency.test.ts`，内存后端/内存 vault，不联网）：同内容第二次 push → `skipped-dup` 且不新增 bundle；`--force` 绕过去重仍上传（新增 bundle）；预置存活在飞锁（pid=当前进程）→ `locked` 且不上传；预置崩溃残留日志（stale pid + doneChunks=[0]）→ `resumed`，复用原 bundleId 且 `skipExisting` 令 seq 0 不再 `putChunk`。另手工验证（未入自动化套件）：分片中途抛错时 journal 保留且 `doneChunks` 只含已完成的分片（`onProgress`→`appendDoneChunk` 串行队列在 `packResource` 失败路径下仍正确落盘）。
 - **v2-Phase 2 新增覆盖**：上传/下载映射纯函数（含 name basename 净化 + `..` 拒绝）、push 缺省镜像 / pull 落文件根、`push -r`/`pull -r` 整树往返字节一致、pull `--out` 恶意 meta.name 穿越被挡。
 - **v2-Phase 3 新增覆盖**：filemanager move/copy/rename（mock）、Backend 目录级操作（本地 fs）、renameResource（改名后分片/wrappedKey 不变、pull 字节一致）、CLI mv/cp/rename 端到端 + rename newName 穿越拒绝。
@@ -56,6 +57,8 @@
 |------|---------|-----------|-----------|------|
 | commands（init/unlock/login/push/pull/…） | `packages/cli/test/commands.*` | >= 70% | — | ✅ 已实现 |
 | prompt（隐藏口令、不回显） | `packages/cli/test/prompt.*` | >= 70% | — | ✅ 已实现 |
+| daemon（cmdBackup/sweepJob/SerialJobRunner） | `packages/cli/test/{backup-cmd,sweep,serial-runner}.test.ts` | >= 80% | — | ✅ 已实现（`cmdDaemon` 长跑循环+信号处理为手动/集成验证，不自动化） |
+| watcher（debounce/listDirsRecursive/watchRecursive） | `packages/cli/test/watcher.test.ts` | >= 70% | — | ✅ 已实现（跨 OS 事件差异手动验证兜底） |
 
 ---
 
