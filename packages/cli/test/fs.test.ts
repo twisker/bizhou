@@ -1,8 +1,22 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cmdInit, cmdLs, cmdMkdir, cmdPush, createRuntime } from "../src/commands.ts";
+import {
+  cmdInfo,
+  cmdInit,
+  cmdLs,
+  cmdMkdir,
+  cmdPull,
+  cmdPush,
+  cmdRm,
+  createRuntime,
+} from "../src/commands.ts";
+
+function sha256(b: Buffer): string {
+  return createHash("sha256").update(b).digest("hex");
+}
 
 let work: string;
 let store: string;
@@ -44,5 +58,28 @@ describe("mkdir + ls（本地后端）", () => {
     const text = lines.join("");
     expect(text).toContain("2026");
     expect(text).toContain("报告.pdf");
+  });
+
+  test("子目录 bundle 可按完整 id / 12 位前缀 pull/info/rm", async () => {
+    const rt = createRuntime();
+
+    const data = randomBytes(8192);
+    const f = join(work, "深藏.bin");
+    await writeFile(f, data);
+    const id = await cmdPush(rt, f, {
+      local: store,
+      to: "/工作/2026",
+      name: "深藏.bin",
+    });
+    expect(id).toMatch(/^[0-9a-f]{32}$/);
+
+    const outDir = join(work, "out-sub");
+    await cmdPull(rt, id, { local: store, out: outDir }); // 完整 id 取子目录 bundle
+    const restored = await readFile(join(outDir, "深藏.bin"));
+    expect(sha256(restored)).toBe(sha256(data));
+
+    await cmdInfo(rt, id.slice(0, 12), { local: store }); // 12 位前缀跨子目录解析，不应抛错
+
+    await cmdRm(rt, id.slice(0, 12), { local: store }); // 前缀删除成功
   });
 });

@@ -2,12 +2,11 @@
  * bz 各命令实现。命令只做"编排 + 交互 + 渲染"，加密/分片/对接全在 @bizhou/core。
  */
 
-import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
-  APP_ROOT,
   BizhouError,
   base32Decode,
   base32Encode,
@@ -37,13 +36,7 @@ import { findSevenZip, sevenZipArchive } from "./export7z.ts";
 import { generatePreview } from "./preview.ts";
 import { readLineFromStdin, readPassword, resolveMasterPassword } from "./prompt.ts";
 import { c, endProgress, formatBytes, info, ok, out, renderProgress, warn } from "./render.ts";
-import {
-  baiduClientForCurrent,
-  createRuntime,
-  makeBackend,
-  makeStore,
-  type Runtime,
-} from "./runtime.ts";
+import { createRuntime, makeBackend, type Runtime } from "./runtime.ts";
 
 export interface CommonOpts {
   local?: string;
@@ -307,12 +300,13 @@ export async function cmdPull(
   opts: CommonOpts & { out?: string },
 ): Promise<void> {
   const mk = await rt.resolveMk(opts);
-  id = await resolveId(rt, id, opts.local);
-  const store = await makeStore(rt, id, opts.local);
+  const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
+  const backend = await makeBackend(rt, opts.local);
+  const store = backend.bundleStore(fullId, dir);
   const { meta } = await readResourceMeta(mk, store);
   const outPath = join(opts.out ?? ".", meta.name);
   await mkdir(dirname(outPath), { recursive: true });
-  info(`下载还原：${id} → ${outPath}（${formatBytes(meta.size)}）`);
+  info(`下载还原：${fullId} → ${outPath}（${formatBytes(meta.size)}）`);
   const res = await unpackResource({
     mk,
     store,
@@ -323,33 +317,42 @@ export async function cmdPull(
   ok(`已还原 ${formatBytes(res.bytesWritten)} → ${outPath}`);
 }
 
-async function listBundleIds(rt: Runtime, local: string | undefined): Promise<string[]> {
-  if (local) {
-    let entries: string[] = [];
-    try {
-      entries = await readdir(local);
-    } catch {
-      return [];
+/** 递归列出整棵云端树里所有 bundle 的 `{id, dir}`（从根 `/` 开始）。 */
+async function listBundles(
+  rt: Runtime,
+  local: string | undefined,
+): Promise<{ id: string; dir: string }[]> {
+  const backend = await makeBackend(rt, local);
+  const result: { id: string; dir: string }[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    const listing = await backend.listDir(dir);
+    result.push(...listing.bundles);
+    for (const d of listing.dirs) {
+      await walk(dir === "/" ? `/${d}` : `${dir}/${d}`);
     }
-    return entries.filter((e) => e.endsWith(".bz")).map((e) => e.slice(0, -3));
-  }
-  const client = await baiduClientForCurrent(rt);
-  const entries = await client.list(APP_ROOT);
-  return entries
-    .filter((e) => e.isdir && e.filename.endsWith(".bz"))
-    .map((e) => e.filename.slice(0, -3));
+  };
+  await walk("/");
+  return result;
 }
 
-/** 把用户给的 ID（可为 `bz ls` 显示的 12 位前缀）解析为完整 32 位 bundleId。 */
-async function resolveId(rt: Runtime, id: string, local: string | undefined): Promise<string> {
-  if (/^[0-9a-f]{32}$/.test(id)) return id; // 已是完整 ID
-  const ids = await listBundleIds(rt, local);
-  const matches = ids.filter((b) => b.startsWith(id.toLowerCase()));
-  if (matches.length === 0) throw new BizhouError("INVALID_ARG", `找不到资源：${id}`);
+/** 把用户给的 ID（可为 `bz ls` 显示的 12 位前缀）解析为完整 bundle，递归遍历子目录查找。 */
+async function resolveBundle(
+  rt: Runtime,
+  idOrPrefix: string,
+  local: string | undefined,
+): Promise<{ id: string; dir: string }> {
+  const bundles = await listBundles(rt, local);
+  if (/^[0-9a-f]{32}$/.test(idOrPrefix)) {
+    const found = bundles.find((b) => b.id === idOrPrefix);
+    if (!found) throw new BizhouError("INVALID_ARG", `找不到资源：${idOrPrefix}`);
+    return found;
+  }
+  const matches = bundles.filter((b) => b.id.startsWith(idOrPrefix.toLowerCase()));
+  if (matches.length === 0) throw new BizhouError("INVALID_ARG", `找不到资源：${idOrPrefix}`);
   if (matches.length > 1) {
     throw new BizhouError(
       "INVALID_ARG",
-      `ID 前缀 ${id} 不唯一（匹配 ${matches.length} 个），请给更长前缀`,
+      `ID 前缀 ${idOrPrefix} 不唯一（匹配 ${matches.length} 个），请给更长前缀`,
     );
   }
   return matches[0]!;
@@ -397,8 +400,9 @@ export async function cmdLs(
 
 export async function cmdInfo(rt: Runtime, id: string, opts: CommonOpts): Promise<void> {
   const mk = await rt.resolveMk(opts);
-  id = await resolveId(rt, id, opts.local);
-  const store = await makeStore(rt, id, opts.local);
+  const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
+  const backend = await makeBackend(rt, opts.local);
+  const store = backend.bundleStore(fullId, dir);
   const { manifest, meta } = await readResourceMeta(mk, store);
   out(`资源 ID   : ${manifest.bundleId}`);
   out(`原文件名  : ${meta.name}`);
@@ -411,10 +415,11 @@ export async function cmdInfo(rt: Runtime, id: string, opts: CommonOpts): Promis
 }
 
 export async function cmdRm(rt: Runtime, id: string, opts: CommonOpts): Promise<void> {
-  id = await resolveId(rt, id, opts.local);
-  const store = await makeStore(rt, id, opts.local);
+  const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
+  const backend = await makeBackend(rt, opts.local);
+  const store = backend.bundleStore(fullId, dir);
   await store.remove();
-  ok(`已删除资源 ${id}`);
+  ok(`已删除资源 ${fullId}`);
 }
 
 // ---- share / preview -----------------------------------------------------
@@ -429,8 +434,9 @@ export async function cmdShare(
   }
   // 默认 --code：导出该资源 DEK 作为分享码。
   const mk = await rt.resolveMk(opts);
-  id = await resolveId(rt, id, opts.local);
-  const store = await makeStore(rt, id, opts.local);
+  const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
+  const backend = await makeBackend(rt, opts.local);
+  const store = backend.bundleStore(fullId, dir);
   const manifest = parseManifest(await store.getManifest());
   const dek = unwrapDek(mk, manifest.wrappedKey);
   const shareCode = SHARE_PREFIX + groupBase32(base32Encode(dek));
@@ -453,8 +459,9 @@ async function cmdShare7z(
     );
   }
   const mk = await rt.resolveMk(opts);
-  id = await resolveId(rt, id, opts.local);
-  const store = await makeStore(rt, id, opts.local);
+  const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
+  const backend = await makeBackend(rt, opts.local);
+  const store = backend.bundleStore(fullId, dir);
   const { meta } = await readResourceMeta(mk, store);
   const work = await mkdtemp(join(tmpdir(), "bizhou-7z-"));
   try {
@@ -477,11 +484,12 @@ export async function cmdPreview(
   opts: CommonOpts & { out?: string },
 ): Promise<void> {
   const mk = await rt.resolveMk(opts);
-  id = await resolveId(rt, id, opts.local);
-  const store = await makeStore(rt, id, opts.local);
+  const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
+  const backend = await makeBackend(rt, opts.local);
+  const store = backend.bundleStore(fullId, dir);
   const { kind, data } = await openPreview(mk, store);
   const ext = kind === "audio" ? "mp3" : "jpg";
-  const outPath = join(opts.out ?? ".", `${id.slice(0, 12)}-preview.${ext}`);
+  const outPath = join(opts.out ?? ".", `${fullId.slice(0, 12)}-preview.${ext}`);
   await mkdir(dirname(outPath), { recursive: true });
   await writeFile(outPath, data);
   ok(`预览（${kind}，${formatBytes(data.length)}）已保存：${outPath}`);

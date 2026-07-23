@@ -11,15 +11,12 @@ import {
   AccountManager,
   type Backend,
   BaiduBackend,
-  BaiduBundleStore,
   BaiduClient,
-  type BundleStore,
   type ConfigPaths,
   configPaths,
   FileSecretStore,
   type HttpClient,
   LocalBackend,
-  LocalBundleStore,
   type OAuthConfig,
   refreshAccessToken,
   resolveFileRoot,
@@ -146,16 +143,6 @@ export async function baiduClientForCurrent(rt: Runtime): Promise<BaiduClient> {
     await rt.accounts.updateTokens(cur.name, tokens);
   }
   return new BaiduClient(rt.oauthConfig(), tokens.accessToken, rt.http);
-}
-
-/** 根据 --local 选项决定用本地目录 store 还是百度 store。 */
-export async function makeStore(
-  rt: Runtime,
-  bundleId: string,
-  localDir: string | undefined,
-): Promise<BundleStore> {
-  if (localDir) return new LocalBundleStore(localDir, bundleId);
-  return new BaiduBundleStore(await baiduClientForCurrent(rt), bundleId);
 }
 
 /** 按 --local 选后端：本地目录 or 百度。 */
