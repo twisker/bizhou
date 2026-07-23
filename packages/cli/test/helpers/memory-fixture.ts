@@ -15,6 +15,7 @@ import {
   type BundleStore,
   type DirListing,
   deriveContentKey,
+  downloadLocalPath,
   generateBundleId,
   generateKey,
   hashPlaintextBuffer,
@@ -37,6 +38,7 @@ import {
   type PushOneOpts,
   type PushOneResult,
   pushOneFile,
+  walkBundlesUnder,
   walkLocalFiles,
 } from "../../src/commands.ts";
 import type { Runtime } from "../../src/runtime.ts";
@@ -113,7 +115,20 @@ class MemoryBackend implements Backend {
     const bundles = [...this.byBundleId.entries()]
       .filter(([, v]) => v.dir === dir)
       .map(([id]) => ({ id, dir }));
-    return { dirs: [], bundles };
+    return { dirs: this.childDirNames(dir), bundles };
+  }
+
+  /** 供 listDir 计算某目录下的直接子目录名（供 walkBundlesUnder 递归发现子树里的 bundle）。 */
+  private childDirNames(parent: string): string[] {
+    const prefix = parent === "/" ? "/" : `${parent}/`;
+    const known = new Set<string>([...this.createdDirs, ...[...this.byBundleId.values()].map((v) => v.dir)]);
+    const children = new Set<string>();
+    for (const d of known) {
+      if (d === parent || !d.startsWith(prefix)) continue;
+      const seg = d.slice(prefix.length).split("/")[0];
+      if (seg) children.add(seg);
+    }
+    return [...children];
   }
 
   bundleStore(bundleId: string, cloudDir: string): BundleStore {
@@ -360,8 +375,11 @@ export interface PullFixture {
   /** 临时目录：既充当落地文件的父目录，也充当 rt.paths.dir（下载日志根）。 */
   readonly tmp: string;
   readonly mk: Buffer;
-  /** 用 packResource 造一个内存 bundle（含 contentId），返回其 `{fullId, dir}`。 */
-  packBundle(data: Buffer, opts?: { chunkSize?: number }): Promise<{ fullId: string; dir: string }>;
+  /** 用 packResource 造一个内存 bundle（含 contentId），返回其 `{fullId, dir}`。`dir` 缺省落到固定夹具目录。 */
+  packBundle(
+    data: Buffer,
+    opts?: { chunkSize?: number; dir?: string },
+  ): Promise<{ fullId: string; dir: string }>;
   /** 驱动被测的 `pullOneBundle`。 */
   pullOne(
     fullId: string,
@@ -369,6 +387,13 @@ export interface PullFixture {
     outPath: string,
     opts: PullOneOpts,
   ): Promise<PullOneResult>;
+  /**
+   * 整树 pull：`walkBundlesUnder` 收集 `startDir` 子树下全部 bundle，逐个复用 `pullOneBundle`
+   * 内核（与 `cmdPull` 递归分支循环体一致），统计各文件的落地状态。
+   */
+  pullRecursive(
+    startDir: string,
+  ): Promise<{ restored: number; skipped: number; locked: number; total: number }>;
   /** 预置一份"存活"下载日志（startedAt=now, pid=当前进程），模拟并发/在飞下载。 */
   writeLiveDownloadLock(fullId: string, dir: string, outPath: string): Promise<void>;
   /**
@@ -431,7 +456,7 @@ export async function makePullFixture(): Promise<PullFixture> {
     mk,
     async packBundle(data, opts = {}) {
       const fullId = generateBundleId();
-      const dir = PULL_FIXTURE_DIR;
+      const dir = normalizeCloudPath(opts.dir ?? PULL_FIXTURE_DIR);
       const srcPath = join(tmp, `${fullId}-src.bin`);
       await writeFile(srcPath, data);
       const contentId = hashPlaintextBuffer(data, contentKey);
@@ -451,6 +476,22 @@ export async function makePullFixture(): Promise<PullFixture> {
     },
     async pullOne(fullId, dir, outPath, opts) {
       return pullOneBundle(rt, backend, mk, contentKey, fullId, dir, outPath, opts);
+    },
+    async pullRecursive(startDir) {
+      const start = normalizeCloudPath(startDir);
+      const bundles = await walkBundlesUnder(backend, start);
+      let restored = 0;
+      let skipped = 0;
+      let locked = 0;
+      for (const b of bundles) {
+        const { meta } = await readResourceMeta(mk, backend.bundleStore(b.id, b.dir));
+        const outPath = downloadLocalPath(tmp, b.dir, meta.name);
+        const r = await pullOneBundle(rt, backend, mk, contentKey, b.id, b.dir, outPath, {});
+        if (r.status === "skipped-dup") skipped++;
+        else if (r.status === "locked") locked++;
+        else restored++;
+      }
+      return { restored, skipped, locked, total: bundles.length };
     },
     async writeLiveDownloadLock(fullId, dir, outPath) {
       const store = backend.bundleStore(fullId, dir);

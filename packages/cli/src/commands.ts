@@ -715,22 +715,27 @@ export async function cmdPull(
       info(`（空）云端目录下无资源：${startDir}`);
       return;
     }
+    const contentKey = deriveContentKey(mk);
+    let restored = 0;
+    let skipped = 0;
     for (const b of bundles) {
-      const store = backend.bundleStore(b.id, b.dir);
-      const { meta } = await readResourceMeta(mk, store);
+      const { meta } = await readResourceMeta(mk, backend.bundleStore(b.id, b.dir));
       const outPath = downloadLocalPath(rt.fileRoot, b.dir, meta.name);
-      await mkdir(dirname(outPath), { recursive: true });
       info(`下载还原：${b.id} → ${outPath}（${formatBytes(meta.size)}）`);
-      const res = await unpackResource({
-        mk,
-        store,
-        outPath,
-        onProgress: (e) => renderProgress("解密", e.bytesDone, e.bytesTotal),
-      });
-      endProgress();
-      ok(`已还原 ${formatBytes(res.bytesWritten)} → ${outPath}`);
+      const r = await pullOneBundle(rt, backend, mk, contentKey, b.id, b.dir, outPath, opts);
+      if (r.status === "skipped-dup") skipped++;
+      else if (r.status === "locked") {
+        /* 跳过，不计 */
+      } else {
+        restored++;
+        ok(
+          `已还原${r.status === "resumed" ? "（续传）" : ""} ${formatBytes(r.bytesWritten)} → ${outPath}`,
+        );
+      }
     }
-    ok(`整树还原完成，共 ${bundles.length} 个文件 → ${rt.fileRoot}`);
+    ok(
+      `整树还原完成：还原 ${restored}，跳过（已存在）${skipped}，共 ${bundles.length} 个 → ${rt.fileRoot}`,
+    );
     return;
   }
 
@@ -749,7 +754,7 @@ export async function cmdPull(
 }
 
 /** 递归列出某云端目录子树下所有 bundle 的 `{id, dir}`。 */
-async function walkBundlesUnder(
+export async function walkBundlesUnder(
   backend: Backend,
   startDir: string,
 ): Promise<{ id: string; dir: string }[]> {
