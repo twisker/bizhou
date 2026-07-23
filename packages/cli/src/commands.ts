@@ -308,9 +308,9 @@ export async function cmdPull(
   const backend = await makeBackend(rt, opts.local);
   const store = backend.bundleStore(fullId, dir);
   const { meta } = await readResourceMeta(mk, store);
-  const outPath = opts.out
-    ? join(rt.fileRoot, opts.out, meta.name)
-    : downloadLocalPath(rt.fileRoot, dir, meta.name);
+  // 两个分支都经 downloadLocalPath（会 normalize 目录段、拒绝 '..'，并 basename 净化 name），
+  // 杜绝 --out 或 meta.name 里的 ../ 逃逸文件根。--out 给定时用它作落点子目录，否则用 bundle 云端目录。
+  const outPath = downloadLocalPath(rt.fileRoot, opts.out ?? dir, meta.name);
   await mkdir(dirname(outPath), { recursive: true });
   info(`下载还原：${fullId} → ${outPath}（${formatBytes(meta.size)}）`);
   const res = await unpackResource({

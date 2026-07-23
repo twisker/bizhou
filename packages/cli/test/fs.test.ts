@@ -110,3 +110,21 @@ test("push 缺省云端目录按文件根镜像；pull 落文件根带入结构"
     delete process.env.BIZHOU_FILE_ROOT;
   }
 });
+
+test("pull --out 也净化恶意 meta.name，防 ../ 逃逸文件根", async () => {
+  const fr = join(work, "fr-sec");
+  process.env.BIZHOU_FILE_ROOT = fr;
+  try {
+    const rt = createRuntime();
+    const data = randomBytes(500);
+    const src = join(work, "sec-src.bin");
+    await writeFile(src, data);
+    // 恶意原文件名（模拟分享他人 bundle 时 encMeta.name 被构造为穿越串）
+    const id = await cmdPush(rt, src, { local: store, name: "../../../../evil.bin" });
+    await cmdPull(rt, id, { local: store, out: "sub" });
+    // 应被 basename 净化，落在 fileRoot/sub/evil.bin，绝不逃逸
+    expect(sha256(await readFile(join(fr, "sub", "evil.bin")))).toBe(sha256(data));
+  } finally {
+    delete process.env.BIZHOU_FILE_ROOT;
+  }
+});
