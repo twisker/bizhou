@@ -8,9 +8,11 @@ import { InvalidArgError } from "../errors.ts";
 /**
  * 规范化：保证前导 "/"、折叠多重 "/"、去掉尾部 "/"（根保留 "/"）。
  * 丢弃 "." 段（当前目录，无害）；拒绝 ".." 段（防止路径穿越到根之外）。
+ * 同时按 "\\" 切分：防止 Windows 上 `\..\` 段被当作单一不透明段绕过 ".." 检查
+ * 而在 LocalBackend 里经 node:path.join 逃逸出 baseDir。
  */
 export function normalizeCloudPath(p: string): string {
-  const parts = p.split("/").filter((s) => s.length > 0 && s !== ".");
+  const parts = p.split(/[/\\]/).filter((s) => s.length > 0 && s !== ".");
   if (parts.includes("..")) {
     throw new InvalidArgError(`云端路径不允许 '..' 段：${p}`);
   }

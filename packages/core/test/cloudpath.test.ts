@@ -22,6 +22,11 @@ describe("normalizeCloudPath", () => {
     expect(() => joinCloudPath("/a", "..", "b")).toThrow(InvalidArgError);
   });
 
+  test("反斜杠也按分隔符处理，防 Windows `\\..\\` 绕过", () => {
+    expect(() => normalizeCloudPath("/a\\..\\etc")).toThrow(InvalidArgError);
+    expect(normalizeCloudPath("/a\\b")).toBe("/a/b");
+  });
+
   test("丢弃 '.' 段（当前目录，无害）", () => {
     expect(normalizeCloudPath("/a/./b")).toBe("/a/b");
   });
