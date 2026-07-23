@@ -18,6 +18,8 @@ const entry = (): JournalEntry => ({
   contentId: "f".repeat(64),
   doneChunks: [],
   totalChunks: 3,
+  chunkSize: 100,
+  compression: "none",
   wrappedKey: "d2hhdGV2ZXItYmFzZTY0LWJsb2I=", // MK 包裹的 DEK（此处仅需形状正确的 base64 串）
   startedAt: "2026-07-23T00:00:00.000Z",
   pid: 4242,
@@ -79,6 +81,17 @@ describe("上传日志", () => {
       const { wrappedKey: _omit, ...withoutWrapped } = entry();
       await writeFile(noWrapped, JSON.stringify(withoutWrapped), "utf8");
       expect(await readJournal(noWrapped)).toBeNull();
+
+      // 缺 chunkSize/compression（续传定钉分片映射的关键字段）也必须拒收：
+      // 否则续传只能回退本次 flag，重蹈确定性 IV 的 nonce 复用。
+      const noChunkSize = join(dir, "no-chunksize.json");
+      const { chunkSize: _cs, ...withoutChunkSize } = entry();
+      await writeFile(noChunkSize, JSON.stringify(withoutChunkSize), "utf8");
+      expect(await readJournal(noChunkSize)).toBeNull();
+
+      const badCompression = join(dir, "bad-compression.json");
+      await writeFile(badCompression, JSON.stringify({ ...entry(), compression: "zstd" }), "utf8");
+      expect(await readJournal(badCompression)).toBeNull();
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

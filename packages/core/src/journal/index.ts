@@ -7,6 +7,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import type { Compression } from "../bundle/index.ts";
 
 export type JournalKind = "upload" | "download";
 
@@ -16,6 +17,15 @@ export interface JournalEntry {
   readonly contentId: string;
   readonly doneChunks: number[];
   readonly totalChunks: number;
+  /**
+   * 首次上传采用的分片大小（字节）与压缩方式。续传时必须原样沿用，忽略本次不同的
+   * --chunk/--no-split/--compress。原因：确定性分片 IV 仅由 (DEK, bundleId, seq) 派生，
+   * 而 seq→明文的映射还取决于 chunkSize 与 compression；若续传改用不同取值，则同一
+   * (DEK, bundleId, seq) 会覆盖不同明文 → AES-GCM nonce 复用（机密性击穿 + tag 伪造）。
+   * 固定这两项后 seq→明文稳定，重加密逐字节可复现，绝不复用 (key, IV) 于不同明文。
+   */
+  readonly chunkSize: number;
+  readonly compression: Compression;
   /**
    * 该 bundle 的 DEK 被 MK 包裹后的 base64 blob（与 manifest.wrappedKey 同等保护）。
    * 续传时据此还原出与首次相同的 DEK，保证已上传分片与新 manifest 用同一 DEK。
@@ -50,6 +60,8 @@ function isValidJournalEntry(e: unknown): e is JournalEntry {
     Array.isArray(o.doneChunks) &&
     o.doneChunks.every((n) => typeof n === "number") &&
     typeof o.totalChunks === "number" &&
+    typeof o.chunkSize === "number" &&
+    (o.compression === "none" || o.compression === "gzip") &&
     typeof o.wrappedKey === "string" &&
     typeof o.startedAt === "string" &&
     typeof o.pid === "number"

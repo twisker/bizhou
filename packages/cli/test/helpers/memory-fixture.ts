@@ -207,6 +207,8 @@ export async function makeMemoryFixture(): Promise<MemoryFixture> {
         contentId,
         doneChunks: [],
         totalChunks: 1,
+        chunkSize: 1,
+        compression: "none",
         wrappedKey: wrapDek(mk, generateKey()), // 形状正确即可（存活锁不会被续传）
         startedAt: new Date().toISOString(), // 现在 → 存活窗口内
         pid: process.pid, // 本进程 → pidAlive 恒真
@@ -248,6 +250,8 @@ export async function makeMemoryFixture(): Promise<MemoryFixture> {
         contentId,
         doneChunks: [0],
         totalChunks,
+        chunkSize: opts.chunkSize, // 首次上传的分片大小，续传必须沿用
+        compression: "none",
         wrappedKey: wrapDek(mk, dek),
         startedAt: new Date(0).toISOString(), // 久远过去，且 pid 不存活 → 判定为崩溃残留
         pid: STALE_PID,

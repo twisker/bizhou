@@ -15,6 +15,7 @@ import {
   base32Encode,
   buildAuthorizeUrl,
   bundleDirName,
+  type Compression,
   changePassword,
   createVault,
   DEFAULT_CHUNK_SIZE,
@@ -344,6 +345,14 @@ export async function pushOneFile(
     }
   }
 
+  // 本次调用的 flag 会得出的分片大小/压缩方式（新建时采用；续传时仅用于比对并提示）。
+  const optChunkSize = opts.noSplit
+    ? Math.max(st.size, 1)
+    : opts.chunk
+      ? parseSize(opts.chunk)
+      : DEFAULT_CHUNK_SIZE;
+  const optCompression: Compression = opts.compress ? "gzip" : "none";
+
   // 2. 查日志：锁 or 续传 or 新建
   const existing = await readJournal(jpath);
   let bundleId: string;
@@ -351,6 +360,10 @@ export async function pushOneFile(
   let status: "uploaded" | "resumed" = "uploaded";
   // DEK 必须跨续传保持一致：已上传分片是首次 DEK 的密文，manifest 也须用同一 DEK 封装。
   let dek: Buffer;
+  // 分片大小/压缩方式：新建取本次 flag；续传必须沿用首次记录，否则 seq→明文映射改变，
+  // 确定性 IV 会在不同明文上复用（AES-GCM nonce 复用漏洞）。
+  let chunkSize: number;
+  let compression: Compression;
   if (existing) {
     const alive = isLockAlive(existing, {
       ttlMs: UPLOAD_LOCK_TTL_MS,
@@ -361,21 +374,23 @@ export async function pushOneFile(
       warn(`同文件正在上传至该目录，本次跳过：${absFile}`);
       return { bundleId: existing.bundleId, status: "locked" };
     }
-    // 崩溃残留（或 --force 复用）→ 续传：复用 bundleId + doneChunks + 同一 DEK。
+    // 崩溃残留（或 --force 复用）→ 续传：复用 bundleId + doneChunks + 同一 DEK + 同一分片/压缩。
     bundleId = existing.bundleId;
     skipExisting = existing.doneChunks;
     dek = unwrapDek(mk, existing.wrappedKey);
     status = "resumed";
+    chunkSize = existing.chunkSize;
+    compression = existing.compression;
+    if (chunkSize !== optChunkSize || compression !== optCompression) {
+      warn("续传：沿用原分片大小/压缩设置，忽略本次不同的 --chunk/--no-split/--compress");
+    }
   } else {
     bundleId = generateBundleId();
     dek = generateKey();
+    chunkSize = optChunkSize;
+    compression = optCompression;
   }
 
-  const chunkSize = opts.noSplit
-    ? Math.max(st.size, 1)
-    : opts.chunk
-      ? parseSize(opts.chunk)
-      : DEFAULT_CHUNK_SIZE;
   const totalChunks = Math.max(1, Math.ceil(st.size / chunkSize));
 
   if (cloudDir !== "/") await backend.mkdir(cloudDir);
@@ -388,6 +403,8 @@ export async function pushOneFile(
     contentId,
     doneChunks: skipExisting,
     totalChunks,
+    chunkSize, // 固定分片大小，续传原样沿用（杜绝确定性 IV 的 nonce 复用）
+    compression, // 固定压缩方式，同上
     wrappedKey: wrapDek(mk, dek), // MK 包裹的 DEK（非裸密钥），供续传还原同一 DEK
     startedAt: new Date(rt.now()).toISOString(),
     pid: process.pid,
@@ -417,7 +434,7 @@ export async function pushOneFile(
       bundleId,
       createdAt: new Date(rt.now()).toISOString(),
       chunkSize,
-      compression: opts.compress ? "gzip" : "none",
+      compression,
       store,
       name: opts.name ?? basename(absFile),
       mtime: st.mtime.toISOString(),

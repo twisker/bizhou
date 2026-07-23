@@ -79,6 +79,32 @@ describe("push 幂等/续传/锁（内存后端）", () => {
     }
   });
 
+  test("nonce 复用回归：续传改用不同 --chunk 仍复现原分片，pull 字节一致", async () => {
+    const fx = await makeMemoryFixture();
+    try {
+      const f = join(fx.tmp, "e.bin");
+      // 原始首次上传使用 chunkSize=100 → 3 个逻辑分片。
+      const original = randomBytes(300);
+      await writeFile(f, original);
+      const seen = await fx.packThenCrashAfterChunk0(f, "/n", { chunkSize: 100 });
+      // 关键：续传时传入不同的 --chunk（50）。若代码采信本次 flag（chunkSize=50），
+      // 则同一 (DEK, bundleId, seq) 会覆盖不同明文 → 确定性 IV 的 nonce 复用；
+      // 且 seq 0 的 manifest 记录会与云端已存的 100 字节密文不符 → pull 校验失败。
+      // 修复后必须固定沿用 journal 记录的 chunkSize=100，逐字节复现 seq 0。
+      const r = await fx.pushOneFile(f, "/n", { chunk: "50" });
+      expect(r.status).toBe("resumed");
+      expect(r.bundleId).toBe(seen.bundleId);
+      expect(seen.putChunkCalls).not.toContain(0); // seq 0 被 skipExisting 跳过（未重写）
+      const outPath = join(fx.tmp, "e.out");
+      const res = await fx.pull(seen.bundleId, "/n", outPath);
+      const restored = await readFile(outPath);
+      expect(restored.equals(original)).toBe(true); // 证明固定了原 chunkSize，边界一致、密文复现
+      expect(res.bytesWritten).toBe(original.length);
+    } finally {
+      await rm(fx.tmp, { recursive: true, force: true });
+    }
+  });
+
   test("--concurrency 非数字（NaN）回退为受限有限默认值", () => {
     const rt = { uploadConcurrency: 4 } as unknown as Runtime;
     // `bz --concurrency foo` → Number("foo") = NaN；不得传播为 NaN。

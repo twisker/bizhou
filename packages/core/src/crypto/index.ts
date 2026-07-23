@@ -76,10 +76,18 @@ function assertKey(key: Buffer): void {
  * 逐字节一致。随机 IV 会让续传时重新加密同一分片得到不同密文，与已上传密文不符 → pull 校验失败。
  * 以 HMAC-SHA256(key, context) 截断为 IV，使"同 key + 同上下文 + 同明文"必得同一密文。
  *
- * 安全性：GCM 要求 (key, IV) 唯一。这里 key=DEK（每 bundle 随机唯一），context 含 bundleId+seq
- * （bundle 内每分片唯一）→ (key, IV) 全局唯一。仅当"同一分片被同 DEK 重新加密"时 IV 重复，
- * 而此时明文亦相同（续传前 contentId 已校验文件未变，见 journal 以 contentId 为键），
- * 属同一 (key, IV, 明文) 的重复运算，不构成 nonce 复用漏洞。IV 无需保密，唯一即可。
+ * 安全不变量（GCM 要求：绝不用同一 (key, IV) 加密不同明文）：
+ *  (a) key=DEK，每个新 bundle 由 CSPRNG 随机生成，互不相同；
+ *  (b) aad = "bundleId:seq"，同一 bundle 内每个分片唯一 → 同一 DEK 下每个 seq 的 IV 唯一；
+ *  (c) 续传时 DEK、bundleId、chunkSize、compression 全部从 journal 固定还原（见
+ *      JournalEntry 与 pushOneFile），故 seq→明文的映射与首次完全一致，重加密逐字节可复现。
+ * 三者合起来：唯一可能重复的 (key, IV) 组合只出现在"续传重算同一 seq"这一情形，而此时明文
+ * 必然与首次相同（(a)(c) 保证），属同一 (key, IV, 明文) 的幂等重算，不是 nonce 复用。
+ *
+ * 反例警示（历史漏洞）：若续传时改用不同的 chunkSize 或 compression，则同一 seq 覆盖不同明文，
+ * (key, IV) 相同而明文不同 → 灾难性 nonce 复用（机密性击穿 + GHASH/tag 伪造）。故上述 (c) 的
+ * chunkSize/compression 固定是本方案安全的前提，绝不可仅凭 contentId 判定"文件未变"而放松。
+ * IV 无需保密，唯一即可。
  */
 export function deriveDeterministicIv(key: Buffer, context: Buffer): Buffer {
   return createHmac("sha256", key).update(context).digest().subarray(0, IV_BYTES);
