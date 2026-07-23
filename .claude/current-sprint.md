@@ -8,53 +8,36 @@
 
 ---
 
-## 当前 Sprint：v2 云端文件系统层 · Phase 1（双本地根 + 目录树基础）
+## 当前状态：Sprint 间歇（v2-Phase 1 已完成并归档；v2-Phase 2 待启动）
 
 **最后更新：** 2026-07-23
-**当前目标：** 按 `docs/superpowers/plans/2026-07-23-cloud-fs-phase1-roots-and-tree.md` 实现：双本地根（密钥根 `~/.bizhou` + 文件根=下载目录）、`cloudpath` 纯函数、`Backend` 抽象（Local/Baidu）、`bz mkdir` 与 `bz ls`（含 `-r`）。
 
-> **上一 Sprint（Sprint 0 / M0+M1）已完成并归档** → `.claude/archive/sprint-0-m0-m1.md`。M0 真机通过、M1 功能全绿。
+### 已完成里程碑
+- **M0 + M1**（客户端加密引擎 + CLI）：真机通过、功能全绿 → 归档 `.claude/archive/sprint-0-m0-m1.md`
+- **v2-Phase 1**（云端 FS 层：双本地根 + 目录树基础 + 递归 bundle 解析）：opus 整分支评审 ✅ Ready to merge → 归档 `.claude/archive/v2-phase1-cloud-fs.md`
 
-### 设计与计划（已就绪）
-- 设计：`docs/superpowers/specs/2026-07-23-cloud-filesystem-layer-design.md`（已确认）
-- 计划：`docs/superpowers/plans/2026-07-23-cloud-fs-phase1-roots-and-tree.md`（Phase 1）
-- Phase 2–4（上传/下载映射含 `-r` 整树备份、mv/cp/rename、回收站）各出独立计划。
+### 代码状态
+- 分支 `feature/init_proj`（工作树干净，领先 `dev`/`main` 各约 49 提交），由人工按 git flow 合并/发版。
+- `bun test` 96 全绿 + 1 skip；typecheck / lint / build（3 产物）全过。
 
-### Phase 1 任务状态 —— ✅ 全部完成（subagent-driven）
-
-| 任务 | 所属模块 | 责任人 | 状态 |
-|------|----------|--------|------|
-| Task 1 双本地根解析（config） | config | AI | ✅ 完成 |
-| Task 2 cloudpath 纯函数（含 `..` 拒绝） | cloudpath | AI | ✅ 完成 |
-| Task 3 BaiduClient.mkdir + BaiduBundleStore cloudDir | baidu | AI | ✅ 完成 |
-| Task 4 Backend 抽象 + LocalBackend | backend | AI | ✅ 完成 |
-| Task 5 BaiduBackend + 导出 | backend | AI | ✅ 完成 |
-| Task 6 CLI runtime keyRoot/fileRoot + makeBackend | cli/runtime | AI | ✅ 完成 |
-| Task 7 `bz mkdir` / `bz ls -r` / `push --to` | cli/commands | AI | ✅ 完成 |
-| Task 8 登记表同步 + 阶段收尾 | 文档 | AI | ✅ 完成 |
-
-**验收：** `bun test` 94 全绿 + 1 skip；typecheck 双包通过；biome 无 error；build 3 产物。每任务经实现子代理(TDD)+评审子代理(规格+质量)双关，一处路径穿越 Important 已当场修复。
+### 下一步（待人工触发）
+| 事项 | 责任人 | 状态 |
+|------|--------|------|
+| git flow 合并 `feature/init_proj → dev`、发版（`dev→main` tag + npm/tap/bucket） | 人工 | 待办（见 `docs/release/发布准备指南.md`） |
+| 启动 **v2-Phase 2**（`push -r`/`pull -r` 整树备份还原、`pull` 落文件根映射、重名歧义） | AI（需人工示意开工） | 待启动（brainstorm → 计划 → 子代理执行） |
+| 后续 v2-Phase 3（mv/cp/rename）、v2-Phase 4（回收站） | AI | 待启动 |
 
 ### 各模块状态
 
-| 模块 | 状态 | 备注 |
-|------|------|------|
-| config（core） | ✅ 稳定 | 双根（密钥根/文件根） |
-| cloudpath（core） | ✅ 稳定 | 纯函数 + 防穿越 |
-| backend（core） | ✅ 稳定 | Backend/Local/Baidu |
-| baidu（core） | ✅ 稳定 | mkdir + store cloudDir |
-| cli runtime/commands | ✅ 稳定 | fileRoot + mkdir/ls/push --to |
+> 全部稳定，详见 `.claude/module-spec-registry.md`。v2-Phase 1 新增 `config`(双根)/`cloudpath`/`backend`(Local/Baidu) 均已稳定。
 
 ### 活跃文件清单
 
-> 当前无进行中的半成品改动。Phase 1 已全部提交，待整分支评审 + 交人工发版。
+> 当前无进行中的半成品改动。
 
 ### 近期重要改动记录
 
 | 时间 | 改动目的 | 涉及 |
 |------|---------|------|
-| 2026-07-23 | Sprint 0（M0+M1）完成并归档；补齐登记表状态 | `.claude/*`、`archive/sprint-0-m0-m1.md` |
-| 2026-07-23 | v2 云端 FS 层设计确认 + Phase 1 计划就绪 | `docs/superpowers/{specs,plans}/` |
-| 2026-07-23 | 统一版本脚本 bump-version.sh（VERSION+所有 package.json）；pre-commit 调用 | `scripts/`、`.githooks/` |
-| 2026-07-23 | v2-Phase 1 全部实现（config 双根/cloudpath/backend/mkdir/ls -r/push --to）+ 路径穿越修复（`..`/`\`） | `packages/core/src/{config,cloudpath,backend,baidu}`、`packages/cli/src/{runtime,commands,index}` |
-| 2026-07-23 | 递归 bundle 解析（Phase 2 前移）：子目录资源可按 id/前缀 pull/info/rm/share/preview；补齐最终评审 Important | `packages/cli/src/{commands,runtime}` |
+| 2026-07-23 | v2-Phase 1 全部完成（config 双根/cloudpath/backend/mkdir/ls -r/push --to）+ 递归 bundle 解析（Phase 2 前移）+ 路径穿越修复 | `packages/core/src/{config,cloudpath,backend,baidu}`、`packages/cli/src/{runtime,commands,index}` |
+| 2026-07-23 | 统一版本脚本 bump-version.sh + 幂等 publish-buckets.sh + 发布准备指南 | `scripts/`、`.githooks/`、`docs/release/` |

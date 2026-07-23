@@ -92,28 +92,32 @@
 
 ---
 
-## v2 — 云端文件系统层（M1 之后的新特性，进行中）
+## v2 — 云端文件系统层（M1 之后的新特性）
 
 **目标：** 把"单文件加密"升级为"整个文件夹的加密云备份/还原 + 类文件系统管理"：真实目录树、双可配本地根（密钥根 `~/.bizhou` + 文件根=下载目录）、上传/下载映射、`mv/cp/rename`、原生回收站、`-r` 递归整树。
 
 **设计（已确认）：** `docs/superpowers/specs/2026-07-23-cloud-filesystem-layer-design.md`
 **执行方式：** 子代理驱动（superpowers:subagent-driven-development），逐任务 TDD，完成后交人工按 git flow 发版。
 
-### v2-Phase 1 — 双本地根 + 目录树基础（计划：`docs/superpowers/plans/2026-07-23-cloud-fs-phase1-roots-and-tree.md`）
+### v2-Phase 1 — 双本地根 + 目录树基础 ✅ **完成（2026-07-23）**
+> 计划：`docs/superpowers/plans/2026-07-23-cloud-fs-phase1-roots-and-tree.md`；归档：`.claude/archive/v2-phase1-cloud-fs.md`
 
 | 任务 | 说明 | 所属模块 | 责任人 | 状态 |
 |-----|------|---------|--------|------|
 | T1 | 双本地根解析（密钥根/文件根，可配） | core/config | AI | ✅ 已完成 |
-| T2 | cloudpath 云端路径纯函数 | core/cloudpath | AI | ✅ 已完成 |
-| T3 | BaiduClient.mkdir + BaiduBundleStore cloudDir | core/baidu | AI | ⏳ 待开始 |
-| T4 | Backend 抽象 + LocalBackend | core/backend | AI | ⏳ 待开始 |
-| T5 | BaiduBackend + 导出 | core/backend | AI | ⏳ 待开始 |
-| T6 | CLI runtime keyRoot/fileRoot + makeBackend | cli/runtime | AI | ⏳ 待开始 |
-| T7 | `bz mkdir` / `bz ls -r` / `push --to` | cli/commands | AI | ⏳ 待开始 |
-| T8 | 登记表同步 + 阶段收尾 | 文档 | AI | ⏳ 待开始 |
+| T2 | cloudpath 云端路径纯函数（含 `..`/`\` 拒绝防穿越） | core/cloudpath | AI | ✅ 已完成 |
+| T3 | BaiduClient.mkdir + BaiduBundleStore cloudDir | core/baidu | AI | ✅ 已完成 |
+| T4 | Backend 抽象 + LocalBackend | core/backend | AI | ✅ 已完成 |
+| T5 | BaiduBackend + 导出 | core/backend | AI | ✅ 已完成 |
+| T6 | CLI runtime keyRoot/fileRoot + makeBackend | cli/runtime | AI | ✅ 已完成 |
+| T7 | `bz mkdir` / `bz ls -r` / `push --to` | cli/commands | AI | ✅ 已完成 |
+| T8 | 登记表同步 + 阶段收尾 | 文档 | AI | ✅ 已完成 |
+| T9 | 递归 bundle 解析（Phase 2 前移，子目录资源可按 id/前缀取回） | cli | AI | ✅ 已完成 |
 
-### v2-Phase 2 — 上传/下载映射（含 `-r` 整树备份/还原）
-> 头条功能"加密文件夹备份/还原"。独立计划待 Phase 1 完成后细化：`push --to` 缺省云端目录计算（来源可在文件根外）、`pull` 落文件根带入结构、`push -r`/`pull -r` 整树、重名歧义。
+**验收：** `bun test` 96 全绿 + 1 skip；typecheck/lint/build(3) 全过；opus 整分支评审 ✅ Ready to merge；评审修复路径穿越（`..`/`\`）+ cmdPreview 隐患。
+
+### v2-Phase 2 — 上传/下载映射（含 `-r` 整树备份/还原）· 待启动
+> 头条功能"加密文件夹备份/还原"。独立计划待启动时细化：`push --to` 缺省云端目录计算（来源可在文件根外）、`pull` 落文件根带入结构、`push -r`/`pull -r` 整树、重名歧义。
 > **已前移完成**：**路径→bundle 递归解析**（子目录资源可按 id/前缀 pull/info/rm/share/preview）——Phase 1 收尾时应最终评审要求提前实现（commit 2fdc684）。
 
 ### v2-Phase 3 — 文件操作
