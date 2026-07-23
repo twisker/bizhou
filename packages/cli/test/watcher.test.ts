@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { debounce, listDirsRecursive } from "../src/watcher.ts";
+import { writeFile } from "node:fs/promises";
+import { debounce, listDirsRecursive, watchRecursive } from "../src/watcher.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -44,6 +45,23 @@ describe("watcher 辅助", () => {
       expect(dirs).toContain(join(root, "a"));
       expect(dirs).toContain(join(root, "a", "b"));
       expect(dirs).toContain(join(root, "c"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("stop() 早于异步注册落定 → 之后的变更不触发 onChange（不泄漏 watcher）", async () => {
+    const root = await mkdtemp(join(tmpdir(), "bizhou-wr2-"));
+    try {
+      await mkdir(join(root, "sub"), { recursive: true });
+      let fired = 0;
+      // 用 platform:"linux" 走异步逐目录注册路径（listDirsRecursive().then(...)）
+      const w = watchRecursive(root, () => fired++, { debounceMs: 10, platform: "linux" });
+      w.stop(); // 立即停：早于 listDirsRecursive() 的 then 回调
+      await sleep(60); // 让迟到的注册回调跑（应被 stopped 挡住，不开句柄）
+      await writeFile(join(root, "sub", "x.txt"), "data"); // 触发变更
+      await sleep(60);
+      expect(fired).toBe(0); // 无泄漏 watcher → 不触发（无此守卫则会 fire）
     } finally {
       await rm(root, { recursive: true, force: true });
     }

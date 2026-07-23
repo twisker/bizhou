@@ -69,7 +69,9 @@ export function watchRecursive(
   const plat = opts.platform ?? process.platform;
   const d = debounce(onChange, opts.debounceMs);
   const watchers: FSWatcher[] = [];
+  let stopped = false;
   const safeWatch = (target: string): void => {
+    if (stopped) return; // 已 stop()：异步注册回调迟到，不再开句柄（防泄漏 inotify FD/卡住退出）
     try {
       watchers.push(watch(target, () => d.call()));
     } catch {
@@ -97,6 +99,7 @@ export function watchRecursive(
 
   return {
     stop() {
+      stopped = true; // 阻止迟到的异步 safeWatch 再开句柄
       d.cancel();
       for (const w of watchers) {
         try {
