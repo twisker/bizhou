@@ -41,6 +41,7 @@ export interface PackOptions {
   readonly name?: string;
   readonly mtime?: string;
   readonly contentType?: string;
+  readonly contentId?: string;
   readonly onProgress?: ProgressCallback;
   readonly skipExisting?: readonly number[];
   /** 可选预览包（由 CLI/前端用 ffmpeg 等生成后传入；核心库只负责加密与存储）。 */
@@ -70,6 +71,7 @@ export async function packResource(opts: PackOptions): Promise<Manifest> {
     size: opts.fileSize,
     ...(opts.mtime ? { mtime: opts.mtime } : {}),
     ...(opts.contentType ? { contentType: opts.contentType } : {}),
+    ...(opts.contentId ? { contentId: opts.contentId } : {}),
   };
 
   let previewInfo: Manifest["preview"];
