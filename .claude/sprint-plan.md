@@ -92,38 +92,67 @@
 
 ---
 
-## v2 — 云端文件系统层（M1 之后的新特性，进行中）
+## v2 — 云端文件系统层（M1 之后的新特性）
 
 **目标：** 把"单文件加密"升级为"整个文件夹的加密云备份/还原 + 类文件系统管理"：真实目录树、双可配本地根（密钥根 `~/.bizhou` + 文件根=下载目录）、上传/下载映射、`mv/cp/rename`、原生回收站、`-r` 递归整树。
 
 **设计（已确认）：** `docs/superpowers/specs/2026-07-23-cloud-filesystem-layer-design.md`
 **执行方式：** 子代理驱动（superpowers:subagent-driven-development），逐任务 TDD，完成后交人工按 git flow 发版。
 
-### v2-Phase 1 — 双本地根 + 目录树基础（计划：`docs/superpowers/plans/2026-07-23-cloud-fs-phase1-roots-and-tree.md`）
+### v2-Phase 1 — 双本地根 + 目录树基础 ✅ **完成（2026-07-23）**
+> 计划：`docs/superpowers/plans/2026-07-23-cloud-fs-phase1-roots-and-tree.md`；归档：`.claude/archive/v2-phase1-cloud-fs.md`
 
 | 任务 | 说明 | 所属模块 | 责任人 | 状态 |
 |-----|------|---------|--------|------|
 | T1 | 双本地根解析（密钥根/文件根，可配） | core/config | AI | ✅ 已完成 |
-| T2 | cloudpath 云端路径纯函数 | core/cloudpath | AI | ✅ 已完成 |
-| T3 | BaiduClient.mkdir + BaiduBundleStore cloudDir | core/baidu | AI | ⏳ 待开始 |
-| T4 | Backend 抽象 + LocalBackend | core/backend | AI | ⏳ 待开始 |
-| T5 | BaiduBackend + 导出 | core/backend | AI | ⏳ 待开始 |
-| T6 | CLI runtime keyRoot/fileRoot + makeBackend | cli/runtime | AI | ⏳ 待开始 |
-| T7 | `bz mkdir` / `bz ls -r` / `push --to` | cli/commands | AI | ⏳ 待开始 |
-| T8 | 登记表同步 + 阶段收尾 | 文档 | AI | ⏳ 待开始 |
+| T2 | cloudpath 云端路径纯函数（含 `..`/`\` 拒绝防穿越） | core/cloudpath | AI | ✅ 已完成 |
+| T3 | BaiduClient.mkdir + BaiduBundleStore cloudDir | core/baidu | AI | ✅ 已完成 |
+| T4 | Backend 抽象 + LocalBackend | core/backend | AI | ✅ 已完成 |
+| T5 | BaiduBackend + 导出 | core/backend | AI | ✅ 已完成 |
+| T6 | CLI runtime keyRoot/fileRoot + makeBackend | cli/runtime | AI | ✅ 已完成 |
+| T7 | `bz mkdir` / `bz ls -r` / `push --to` | cli/commands | AI | ✅ 已完成 |
+| T8 | 登记表同步 + 阶段收尾 | 文档 | AI | ✅ 已完成 |
+| T9 | 递归 bundle 解析（Phase 2 前移，子目录资源可按 id/前缀取回） | cli | AI | ✅ 已完成 |
 
-### v2-Phase 2 — 上传/下载映射（含 `-r` 整树备份/还原）
-> 头条功能"加密文件夹备份/还原"。独立计划待 Phase 1 完成后细化：`push --to` 缺省云端目录计算（来源可在文件根外）、`pull` 落文件根带入结构、`push -r`/`pull -r` 整树、重名歧义。
-> **已前移完成**：**路径→bundle 递归解析**（子目录资源可按 id/前缀 pull/info/rm/share/preview）——Phase 1 收尾时应最终评审要求提前实现（commit 2fdc684）。
+**验收：** `bun test` 96 全绿 + 1 skip；typecheck/lint/build(3) 全过；opus 整分支评审 ✅ Ready to merge；评审修复路径穿越（`..`/`\`）+ cmdPreview 隐患。
 
-### v2-Phase 3 — 文件操作
-> `mv`、`cp`(`-r`)、`rename`（bundle=改 encMeta / 目录=native）。
+### v2-Phase 2 — 上传/下载映射（含 `-r` 整树备份/还原）✅ **完成（2026-07-23）**
+> 计划：`docs/superpowers/plans/2026-07-23-cloud-fs-phase2-mapping-recursive.md`
 
-### v2-Phase 4 — 回收站
-> `rm`→百度原生回收站（`-r`/`--yes`）；`trash list/restore/rm/clear`（原生，开放 API 不支持则提示去百度 App）；联网验证回收站 API 支持度。
+| 任务 | 说明 | 状态 |
+|-----|------|------|
+| T1 | cloudpath 映射纯函数（defaultUploadCloudDir/downloadLocalPath，含 name basename 净化） | ✅ |
+| T2 | push 缺省云端目录镜像 + pull 落文件根带入结构（含 --out 穿越修复） | ✅ |
+| T3+T4 | `push -r` / `pull -r` 递归整树加密备份/还原 | ✅ |
+| — | 路径→bundle 递归解析（已在 v2-P1 T9 前移完成） | ✅ |
+
+**验收：** `bun test` 105 全绿 + 1 skip；typecheck/lint/build 全过；每任务子代理实现+评审，修复 2 处路径穿越（--out `meta.name`、name 未净化）。
+
+### v2-Phase 3 — 文件操作 ✅ **完成（2026-07-23）**
+> 计划：`docs/superpowers/plans/2026-07-23-cloud-fs-phase3-file-ops.md`
+
+| 任务 | 说明 | 状态 |
+|-----|------|------|
+| T1 | filemanager move/copy/rename + Backend 目录级 move/copy/rename（含 rename newName 单段校验防穿越） | ✅ |
+| T2 | `renameResource`（bundle 真名=重写 encMeta，分片不动） | ✅ |
+| T3 | `bz mv` / `cp`(`-r`) / `rename`（目录 native / bundle encMeta；分派只对"未找到"回退目录） | ✅ |
+
+**验收：** `bun test` 122 全绿 + 1 skip；typecheck/lint/build 全过；修复 2 处 Important（rename 穿越、分派吞错）。
+
+### v2-Phase 4 — 回收站 ✅ **完成（2026-07-23）**
+> 计划：`docs/superpowers/plans/2026-07-23-cloud-fs-phase4-recycle-bin.md`
+
+| 任务 | 说明 | 状态 |
+|-----|------|------|
+| T1 | Backend 回收站：LocalBackend `.trash/`（完整可测）+ BaiduBackend 原生删除/管理提示去 App | ✅ |
+| T2 | `bz rm`→回收站（目录需 `--yes`）+ `bz trash [list/restore/rm/clear]` | ✅ |
+
+**验收：** `bun test` 131 全绿 + 1 skip；typecheck/lint/build 全过；修复 rename 穿越/分派吞错等（见各阶段）。
+**⚠ 待联网验证（人工 H-08）：** 百度开放平台**回收站管理接口**是否可用——当前 `bz trash *` 对百度后端抛"请到百度 App 操作"兜底；若开放 API 实际支持，可后续接入。删除进原生回收站本身可用（filemanager delete）。
 
 ---
 
 ## Phase 3 — 打磨与生态（远期，待细化）
 
-> 候选：shell 补全、更多预览类型、daemon/定时备份、GUI 前端接入核心库、进 homebrew-core / winget、worker_threads 并行加密、移动端（远期）。
+> **范围：本项目只做 CLI 相关（不做 GUI 前端、不做移动端）。**
+> 候选：shell 补全、更多预览类型、daemon/定时备份、进 homebrew-core / winget、worker_threads 并行加密。

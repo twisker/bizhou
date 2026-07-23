@@ -85,6 +85,11 @@ function sliceTransfer(data: Buffer): Buffer[] {
   return parts;
 }
 
+/** 路径最后一段（basename），仅字符串操作，不依赖 cloudpath（client 只处理绝对远端路径）。 */
+function lastSegment(path: string): string {
+  return path.slice(path.lastIndexOf("/") + 1);
+}
+
 function form(params: Record<string, string>): string {
   return Object.entries(params)
     .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
@@ -257,13 +262,37 @@ export class BaiduClient {
     }));
   }
 
-  /** 删除远端路径（文件或目录）。 */
-  async deletePaths(paths: string[]): Promise<void> {
+  /** filemanager 通用封装：POST filemanager?opera=... body async=0&filelist=[...]。 */
+  private async fileManagerOp(opera: string, filelist: unknown[]): Promise<void> {
     await this.fileApi(
       "filemanager",
-      { opera: "delete" },
-      form({ async: "0", filelist: JSON.stringify(paths), ondup: "fail" }),
+      { opera },
+      form({ async: "0", filelist: JSON.stringify(filelist), ondup: "fail" }),
     );
+  }
+
+  /** 删除远端路径（文件或目录）。 */
+  async deletePaths(paths: string[]): Promise<void> {
+    await this.fileManagerOp("delete", paths);
+  }
+
+  /** 移动 srcPath 到 dstDir 下（目录级，保留原名）。 */
+  async move(srcPath: string, dstDir: string): Promise<void> {
+    await this.fileManagerOp("move", [
+      { path: srcPath, dest: dstDir, newname: lastSegment(srcPath) },
+    ]);
+  }
+
+  /** 复制 srcPath 到 dstDir 下（目录级，保留原名；源保留）。 */
+  async copy(srcPath: string, dstDir: string): Promise<void> {
+    await this.fileManagerOp("copy", [
+      { path: srcPath, dest: dstDir, newname: lastSegment(srcPath) },
+    ]);
+  }
+
+  /** 原地改名（同目录下改末段名）。 */
+  async rename(srcPath: string, newName: string): Promise<void> {
+    await this.fileManagerOp("rename", [{ path: srcPath, newname: newName }]);
   }
 
   /** 创建目录（xpan create isdir=1，等价 mkdir -p）。 */

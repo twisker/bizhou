@@ -2,29 +2,35 @@
  * bz 各命令实现。命令只做"编排 + 交互 + 渲染"，加密/分片/对接全在 @bizhou/core。
  */
 
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
+  type Backend,
   BizhouError,
   base32Decode,
   base32Encode,
   buildAuthorizeUrl,
+  bundleDirName,
   changePassword,
   createVault,
   DEFAULT_CHUNK_SIZE,
+  defaultUploadCloudDir,
   deriveKey,
+  downloadLocalPath,
   exchangeCodeForToken,
   generateBundleId,
   generateSalt,
   groupBase32,
+  joinCloudPath,
   normalizeCloudPath,
   openPreview,
   packResource,
   parseManifest,
   pollDeviceToken,
   readResourceMeta,
+  renameResource,
   startDeviceFlow,
   unlockWithPassword,
   unlockWithRecovery,
@@ -246,9 +252,14 @@ export async function cmdPush(
     name?: string;
     preview?: boolean;
     to?: string;
+    recursive?: boolean;
   },
 ): Promise<string> {
   const st = await stat(filePath);
+  if (opts.recursive) {
+    if (!st.isDirectory()) throw new BizhouError("INVALID_ARG", `-r 需要目录：${filePath}`);
+    return cmdPushRecursive(rt, filePath, opts);
+  }
   if (!st.isFile()) throw new BizhouError("INVALID_ARG", `不是文件：${filePath}`);
   const mk = await rt.resolveMk(opts);
   const bundleId = generateBundleId();
@@ -257,9 +268,11 @@ export async function cmdPush(
     : opts.chunk
       ? parseSize(opts.chunk)
       : DEFAULT_CHUNK_SIZE;
-  const cloudDir = normalizeCloudPath(opts.to ?? "/");
+  const cloudDir = opts.to
+    ? normalizeCloudPath(opts.to)
+    : defaultUploadCloudDir(resolve(filePath), rt.fileRoot);
   const backend = await makeBackend(rt, opts.local);
-  if (opts.to) await backend.mkdir(cloudDir); // 目标目录不存在则建
+  if (cloudDir !== "/") await backend.mkdir(cloudDir); // 目标目录不存在则建
   const store = backend.bundleStore(bundleId, cloudDir);
 
   let preview: { kind: "video" | "audio" | "image"; data: Buffer } | undefined;
@@ -294,17 +307,117 @@ export async function cmdPush(
   return bundleId;
 }
 
+/** 递归收集本地目录下所有文件的绝对路径（子目录深度不限）。 */
+async function walkLocalFiles(absDir: string): Promise<string[]> {
+  const result: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    const entries = await readdir(dir, { withFileTypes: true });
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (e.isFile()) result.push(p);
+    }
+  };
+  await walk(absDir);
+  return result;
+}
+
+/** `push -r`：把本地目录树逐文件 packResource 到镜像的云端子目录树下。 */
+async function cmdPushRecursive(
+  rt: Runtime,
+  dirPath: string,
+  opts: CommonOpts & { chunk?: string; compress?: boolean; noSplit?: boolean; to?: string },
+): Promise<string> {
+  const mk = await rt.resolveMk(opts);
+  const absDir = resolve(dirPath);
+  // 目录本身的缺省镜像位置：取"目录当作一个条目"时的父级镜像，再把目录名接回去。
+  const baseCloud = opts.to
+    ? normalizeCloudPath(opts.to)
+    : defaultUploadCloudDir(absDir + sep, rt.fileRoot);
+  const rootCloud = joinCloudPath(baseCloud, basename(absDir));
+  const backend = await makeBackend(rt, opts.local);
+  if (rootCloud !== "/") await backend.mkdir(rootCloud);
+
+  const files = await walkLocalFiles(absDir);
+  if (files.length === 0) {
+    info(`（空目录，无文件可上传）：${absDir}`);
+    return rootCloud;
+  }
+
+  for (const abs of files) {
+    const rel = relative(absDir, abs);
+    const relDir = dirname(rel);
+    const cloudDir = relDir === "." ? rootCloud : joinCloudPath(rootCloud, relDir);
+    if (cloudDir !== "/") await backend.mkdir(cloudDir);
+    const st = await stat(abs);
+    const bundleId = generateBundleId();
+    const chunkSize = opts.noSplit
+      ? Math.max(st.size, 1)
+      : opts.chunk
+        ? parseSize(opts.chunk)
+        : DEFAULT_CHUNK_SIZE;
+    const store = backend.bundleStore(bundleId, cloudDir);
+    info(`加密上传：${abs}（${formatBytes(st.size)}）→ ${cloudDir}/${basename(abs)}`);
+    await packResource({
+      filePath: abs,
+      fileSize: st.size,
+      mk,
+      bundleId,
+      createdAt: new Date().toISOString(),
+      chunkSize,
+      compression: opts.compress ? "gzip" : "none",
+      store,
+      name: basename(abs),
+      mtime: st.mtime.toISOString(),
+      onProgress: (e) => renderProgress("加密", e.bytesDone, e.bytesTotal),
+    });
+    endProgress();
+    ok(`已上传：${rel} → ${bundleId}`);
+  }
+  ok(`整树上传完成，共 ${files.length} 个文件 → ${rootCloud}`);
+  return rootCloud;
+}
+
 export async function cmdPull(
   rt: Runtime,
   id: string,
-  opts: CommonOpts & { out?: string },
+  opts: CommonOpts & { out?: string; recursive?: boolean },
 ): Promise<void> {
   const mk = await rt.resolveMk(opts);
-  const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
   const backend = await makeBackend(rt, opts.local);
+
+  if (opts.recursive) {
+    const startDir = normalizeCloudPath(id);
+    const bundles = await walkBundlesUnder(backend, startDir);
+    if (bundles.length === 0) {
+      info(`（空）云端目录下无资源：${startDir}`);
+      return;
+    }
+    for (const b of bundles) {
+      const store = backend.bundleStore(b.id, b.dir);
+      const { meta } = await readResourceMeta(mk, store);
+      const outPath = downloadLocalPath(rt.fileRoot, b.dir, meta.name);
+      await mkdir(dirname(outPath), { recursive: true });
+      info(`下载还原：${b.id} → ${outPath}（${formatBytes(meta.size)}）`);
+      const res = await unpackResource({
+        mk,
+        store,
+        outPath,
+        onProgress: (e) => renderProgress("解密", e.bytesDone, e.bytesTotal),
+      });
+      endProgress();
+      ok(`已还原 ${formatBytes(res.bytesWritten)} → ${outPath}`);
+    }
+    ok(`整树还原完成，共 ${bundles.length} 个文件 → ${rt.fileRoot}`);
+    return;
+  }
+
+  const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
   const store = backend.bundleStore(fullId, dir);
   const { meta } = await readResourceMeta(mk, store);
-  const outPath = join(opts.out ?? ".", meta.name);
+  // 两个分支都经 downloadLocalPath（会 normalize 目录段、拒绝 '..'，并 basename 净化 name），
+  // 杜绝 --out 或 meta.name 里的 ../ 逃逸文件根。--out 给定时用它作落点子目录，否则用 bundle 云端目录。
+  const outPath = downloadLocalPath(rt.fileRoot, opts.out ?? dir, meta.name);
   await mkdir(dirname(outPath), { recursive: true });
   info(`下载还原：${fullId} → ${outPath}（${formatBytes(meta.size)}）`);
   const res = await unpackResource({
@@ -317,12 +430,11 @@ export async function cmdPull(
   ok(`已还原 ${formatBytes(res.bytesWritten)} → ${outPath}`);
 }
 
-/** 递归列出整棵云端树里所有 bundle 的 `{id, dir}`（从根 `/` 开始）。 */
-async function listBundles(
-  rt: Runtime,
-  local: string | undefined,
+/** 递归列出某云端目录子树下所有 bundle 的 `{id, dir}`。 */
+async function walkBundlesUnder(
+  backend: Backend,
+  startDir: string,
 ): Promise<{ id: string; dir: string }[]> {
-  const backend = await makeBackend(rt, local);
   const result: { id: string; dir: string }[] = [];
   const walk = async (dir: string): Promise<void> => {
     const listing = await backend.listDir(dir);
@@ -331,8 +443,21 @@ async function listBundles(
       await walk(dir === "/" ? `/${d}` : `${dir}/${d}`);
     }
   };
-  await walk("/");
+  await walk(startDir);
   return result;
+}
+
+/**
+ * 递归列出整棵云端树里所有 bundle 的 `{id, dir}`（从根 `/` 开始）。
+ * `backend` 可选：调用方若已建好 backend，传入以避免重复 makeBackend（重复走 token 刷新）。
+ */
+async function listBundles(
+  rt: Runtime,
+  local: string | undefined,
+  backend?: Backend,
+): Promise<{ id: string; dir: string }[]> {
+  const b = backend ?? (await makeBackend(rt, local));
+  return walkBundlesUnder(b, "/");
 }
 
 /** 把用户给的 ID（可为 `bz ls` 显示的 12 位前缀）解析为完整 bundle，递归遍历子目录查找。 */
@@ -340,8 +465,9 @@ async function resolveBundle(
   rt: Runtime,
   idOrPrefix: string,
   local: string | undefined,
+  backend?: Backend,
 ): Promise<{ id: string; dir: string }> {
-  const bundles = await listBundles(rt, local);
+  const bundles = await listBundles(rt, local, backend);
   if (/^[0-9a-f]{32}$/.test(idOrPrefix)) {
     const found = bundles.find((b) => b.id === idOrPrefix);
     if (!found) throw new BizhouError("INVALID_ARG", `找不到资源：${idOrPrefix}`);
@@ -356,6 +482,31 @@ async function resolveBundle(
     );
   }
   return matches[0]!;
+}
+
+/**
+ * 解析 bundle：确实找不到→返回 null（供上层回退为目录路径）；歧义/后端错误→抛出（不吞）。
+ * 与 `resolveBundle` 的区别：后者对"找不到"也抛错，本函数只对"找不到"返回 null，
+ * 让 mv/cp/rename 能安全区分"当目录处理"与"歧义/网络错误应如实报错"两种情形。
+ */
+export async function resolveBundleOrNull(
+  rt: Runtime,
+  idOrPrefix: string,
+  local: string | undefined,
+  backend?: Backend,
+): Promise<{ id: string; dir: string } | null> {
+  const bundles = await listBundles(rt, local, backend); // 后端错误在此自然抛出（不被吞）
+  const full = /^[0-9a-f]{32}$/.test(idOrPrefix)
+    ? bundles.filter((b) => b.id === idOrPrefix)
+    : bundles.filter((b) => b.id.startsWith(idOrPrefix.toLowerCase()));
+  if (full.length === 0) return null; // 确实找不到
+  if (full.length > 1) {
+    throw new BizhouError(
+      "INVALID_ARG",
+      `ID 前缀 ${idOrPrefix} 不唯一（匹配 ${full.length} 个），请给更长前缀`,
+    );
+  }
+  return full[0]!;
 }
 
 export async function cmdMkdir(rt: Runtime, cloudDir: string, opts: CommonOpts): Promise<void> {
@@ -414,12 +565,114 @@ export async function cmdInfo(rt: Runtime, id: string, opts: CommonOpts): Promis
   if (meta.mtime) out(`原修改时间: ${meta.mtime}`);
 }
 
-export async function cmdRm(rt: Runtime, id: string, opts: CommonOpts): Promise<void> {
-  const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
+export async function cmdRm(
+  rt: Runtime,
+  src: string,
+  opts: CommonOpts & { recursive?: boolean; yes?: boolean },
+): Promise<void> {
   const backend = await makeBackend(rt, opts.local);
-  const store = backend.bundleStore(fullId, dir);
-  await store.remove();
-  ok(`已删除资源 ${fullId}`);
+  const b = await resolveBundleOrNull(rt, src, opts.local, backend);
+  const isBundle = b !== null;
+  const path = b ? joinCloudPath(b.dir, bundleDirName(b.id)) : normalizeCloudPath(src);
+  if (!isBundle && !opts.yes) {
+    throw new BizhouError("INVALID_ARG", `删除目录 ${path} 及其内容将进回收站，请加 --yes 确认`);
+  }
+  await backend.trashPath(path, new Date().toISOString());
+  ok(`已删除到回收站：${isBundle ? b.id : path}`);
+}
+
+export async function cmdTrash(
+  rt: Runtime,
+  sub: string | undefined,
+  arg: string | undefined,
+  opts: CommonOpts,
+): Promise<void> {
+  const backend = await makeBackend(rt, opts.local);
+  if (!sub || sub === "list") {
+    const entries = await backend.listTrash();
+    if (entries.length === 0) {
+      info("（回收站为空）");
+      return;
+    }
+    for (const e of entries) {
+      out(`${e.entryId}  ${e.name}  ${e.originalPath}  ${e.deletedAt}`);
+    }
+    return;
+  }
+  if (sub === "restore") {
+    if (!arg) throw new BizhouError("INVALID_ARG", "用法：bz trash restore <entryId>");
+    await backend.restoreTrash(arg);
+    ok(`已从回收站恢复：${arg}`);
+    return;
+  }
+  if (sub === "rm") {
+    if (!arg) throw new BizhouError("INVALID_ARG", "用法：bz trash rm <entryId>");
+    await backend.deleteTrash(arg);
+    ok(`已从回收站永久删除：${arg}`);
+    return;
+  }
+  if (sub === "clear") {
+    await backend.clearTrash();
+    ok("回收站已清空");
+    return;
+  }
+  throw new BizhouError("INVALID_ARG", `未知子命令：trash ${sub}`);
+}
+
+// ---- mv / cp / rename ------------------------------------------------------
+
+export async function cmdMv(
+  rt: Runtime,
+  src: string,
+  dstDir: string,
+  opts: CommonOpts,
+): Promise<void> {
+  const backend = await makeBackend(rt, opts.local);
+  const b = await resolveBundleOrNull(rt, src, opts.local, backend);
+  const srcPath = b ? joinCloudPath(b.dir, bundleDirName(b.id)) : normalizeCloudPath(src);
+  const dst = normalizeCloudPath(dstDir);
+  await backend.mkdir(dst);
+  await backend.move(srcPath, dst);
+  ok(`已移动 ${srcPath} → ${dst}`);
+}
+
+export async function cmdCp(
+  rt: Runtime,
+  src: string,
+  dstDir: string,
+  opts: CommonOpts & { recursive?: boolean },
+): Promise<void> {
+  const backend = await makeBackend(rt, opts.local);
+  const b = await resolveBundleOrNull(rt, src, opts.local, backend);
+  const isBundle = b !== null;
+  const srcPath = b ? joinCloudPath(b.dir, bundleDirName(b.id)) : normalizeCloudPath(src);
+  if (!isBundle && !opts.recursive) {
+    throw new BizhouError("INVALID_ARG", "复制目录需 -r");
+  }
+  const dst = normalizeCloudPath(dstDir);
+  await backend.mkdir(dst);
+  await backend.copy(srcPath, dst);
+  ok(`已复制 ${srcPath} → ${dst}`);
+}
+
+export async function cmdRename(
+  rt: Runtime,
+  src: string,
+  newName: string,
+  opts: CommonOpts,
+): Promise<void> {
+  const backend = await makeBackend(rt, opts.local);
+  const b = await resolveBundleOrNull(rt, src, opts.local, backend);
+  if (b) {
+    const mk = await rt.resolveMk(opts);
+    const bundleStore = backend.bundleStore(b.id, b.dir);
+    await renameResource(mk, bundleStore, newName);
+    ok(`已改名 ${b.id} → ${newName}`);
+    return;
+  }
+  const srcPath = normalizeCloudPath(src);
+  await backend.rename(srcPath, newName);
+  ok(`已改名 ${srcPath} → ${newName}`);
 }
 
 // ---- share / preview -----------------------------------------------------

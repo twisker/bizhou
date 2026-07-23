@@ -6,7 +6,10 @@
 
 ## 当前测试结果（2026-07-23）
 
-- `bun test`：**96 项全绿 + 1 skip**（15 文件），`pnpm run typecheck` 双包通过，`biome check` 无 error，`pnpm run build` 产 3 份产物。
+- `bun test`：**131 项全绿 + 1 skip**（15 文件），`pnpm run typecheck` 双包通过，`biome check` 无 error，`pnpm run build` 产 3 份产物。
+- **v2-Phase 2 新增覆盖**：上传/下载映射纯函数（含 name basename 净化 + `..` 拒绝）、push 缺省镜像 / pull 落文件根、`push -r`/`pull -r` 整树往返字节一致、pull `--out` 恶意 meta.name 穿越被挡。
+- **v2-Phase 3 新增覆盖**：filemanager move/copy/rename（mock）、Backend 目录级操作（本地 fs）、renameResource（改名后分片/wrappedKey 不变、pull 字节一致）、CLI mv/cp/rename 端到端 + rename newName 穿越拒绝。
+- **v2-Phase 4 新增覆盖**：LocalBackend `.trash/` 回收站往返（trash→list→restore→clear，listDir 忽略 .trash）、BaiduBackend 原生 delete + 管理方法抛"去 App"、CLI rm→回收站（目录需 --yes）+ trash 命令。
 - 测试文件：core `{crypto,base32,vault,bundle,resource,baidu,account,preview,baidu.live,config,cloudpath,backend.local,backend.baidu}.test.ts` + cli `{cli,fs}.test.ts`（baidu.live 需 `BIZHOU_LIVE=1`+token，默认 skip；cli.test 的 7z 测试无 7z 时 skip）。
 - **v2-Phase 1 新增覆盖**：config 双根解析、cloudpath 纯函数（含 `..` 拒绝防穿越）、Backend/LocalBackend/BaiduBackend（mkdir/listDir/bundleStore）、CLI `bz mkdir`/`ls -r`/`push --to` 离线端到端。
 - 关键覆盖：AES-GCM 往返 + 篡改/错密钥/AAD 失败、KDF/信封、vault 双路解锁 + 改密、manifest 严格校验、**资源 pack→unpack 字节级往返**（单/多片/整除/空/gzip/3MB/内存 store）、篡改分片与错 MK 被拒、百度上传编排（partseq/md5/断点续传/errno）+ 模拟网盘端到端、多账号 + 设备密钥加密落盘、预览加密往返。

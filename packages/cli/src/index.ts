@@ -12,6 +12,7 @@ import { parseArgs } from "node:util";
 import { BizhouError } from "@bizhou/core";
 import {
   cmdAccount,
+  cmdCp,
   cmdInfo,
   cmdInit,
   cmdLock,
@@ -19,13 +20,16 @@ import {
   cmdLogout,
   cmdLs,
   cmdMkdir,
+  cmdMv,
   cmdPasswd,
   cmdPreview,
   cmdPull,
   cmdPush,
   cmdRecover,
+  cmdRename,
   cmdRm,
   cmdShare,
+  cmdTrash,
   cmdUnlock,
   createRuntime,
 } from "./commands.ts";
@@ -48,12 +52,16 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
   account [list|use <n>|add <n>]               多账号管理
 
 资源:
-  push <path> [--chunk 100MB] [--compress] [--no-split] [--name <n>] [--preview] [--to <云端目录>]
-  pull <id> [--out <dir>]
+  push <path> [-r] [--chunk 100MB] [--compress] [--no-split] [--name <n>] [--preview] [--to <云端目录>]
+  pull <id|云端目录> [-r] [--out <dir>]   还原到文件根下（--out 为文件根内子目录，默认按云端结构镜像）
   mkdir <目录>             创建云端目录（mkdir -p 语义）
   ls [目录] [-r]           列出目录（显示真名，需已解锁；-r 递归）
   info <id>                查看资源元数据
-  rm <id>                  删除资源
+  rm <路径|id> [--yes]     删除到回收站（删除目录需 --yes 确认）
+  trash [list|restore <id>|rm <id>|clear]  回收站管理（列出/恢复/永久删除/清空）
+  mv <src> <目标目录>       移动 bundle 或目录到目标目录下
+  cp <src> <目标目录> [-r]  复制 bundle 或目录（目录需 -r）到目标目录下
+  rename <src> <新名>       改名：bundle 改真名（重写 encMeta）/ 目录 native 改名
   share <id> [--code|--7z] 生成分享码 / 导出 7z-AES（--7z 需 7z 二进制）
   preview <id> [--out <dir>]  下载并解密预览包（图片/视频缩略、音频片段）
 
@@ -103,6 +111,7 @@ async function main(argv: string[]): Promise<number> {
       force: { type: "boolean" },
       recursive: { type: "boolean", short: "r" },
       to: { type: "string" },
+      yes: { type: "boolean" },
     },
   });
 
@@ -161,11 +170,16 @@ async function main(argv: string[]): Promise<number> {
         name: values.name as string | undefined,
         preview: Boolean(values.preview),
         to: values.to as string | undefined,
+        recursive: Boolean(values.recursive),
       });
       return 0;
     case "pull":
       if (!positionals[1]) throw new BizhouError("INVALID_ARG", "用法：bz pull <id>");
-      await cmdPull(rt, positionals[1], { ...common, out: values.out as string | undefined });
+      await cmdPull(rt, positionals[1], {
+        ...common,
+        out: values.out as string | undefined,
+        recursive: Boolean(values.recursive),
+      });
       return 0;
     case "mkdir":
       if (!positionals[1]) throw new BizhouError("INVALID_ARG", "用法：bz mkdir <目录>");
@@ -179,8 +193,35 @@ async function main(argv: string[]): Promise<number> {
       await cmdInfo(rt, positionals[1], common);
       return 0;
     case "rm":
-      if (!positionals[1]) throw new BizhouError("INVALID_ARG", "用法：bz rm <id>");
-      await cmdRm(rt, positionals[1], common);
+      if (!positionals[1]) throw new BizhouError("INVALID_ARG", "用法：bz rm <路径|id> [--yes]");
+      await cmdRm(rt, positionals[1], {
+        ...common,
+        yes: Boolean(values.yes),
+      });
+      return 0;
+    case "trash":
+      await cmdTrash(rt, positionals[1], positionals[2], common);
+      return 0;
+    case "mv":
+      if (!positionals[1] || !positionals[2]) {
+        throw new BizhouError("INVALID_ARG", "用法：bz mv <src> <目标目录>");
+      }
+      await cmdMv(rt, positionals[1], positionals[2], common);
+      return 0;
+    case "cp":
+      if (!positionals[1] || !positionals[2]) {
+        throw new BizhouError("INVALID_ARG", "用法：bz cp <src> <目标目录> [-r]");
+      }
+      await cmdCp(rt, positionals[1], positionals[2], {
+        ...common,
+        recursive: Boolean(values.recursive),
+      });
+      return 0;
+    case "rename":
+      if (!positionals[1] || !positionals[2]) {
+        throw new BizhouError("INVALID_ARG", "用法：bz rename <src> <新名>");
+      }
+      await cmdRename(rt, positionals[1], positionals[2], common);
       return 0;
     case "share":
       if (!positionals[1]) throw new BizhouError("INVALID_ARG", "用法：bz share <id>");

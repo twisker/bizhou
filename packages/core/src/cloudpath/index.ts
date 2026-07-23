@@ -3,6 +3,7 @@
  * 不碰 IO，供上传/下载映射与目录寻址复用。
  */
 
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { InvalidArgError } from "../errors.ts";
 
 /**
@@ -37,4 +38,39 @@ export function cloudBasename(p: string): string {
 
 export function splitCloudPath(p: string): { dir: string; base: string } {
   return { dir: cloudDirname(p), base: cloudBasename(p) };
+}
+
+/** 校验一个"名字段"是合法单段文件名（拒绝含分隔符 / \ 或 . / .. / 空，防重命名穿越）。 */
+export function assertNameSegment(name: string): void {
+  if (name === "" || name === "." || name === ".." || /[/\\]/.test(name)) {
+    throw new InvalidArgError(`非法名称（须为单段文件名，不含路径分隔符/..）：${name}`);
+  }
+}
+
+/**
+ * 上传缺省云端目录：让 sourceAbs 落到相对文件根的镜像位置。
+ * 取 sourceAbs 的父目录相对 fileRoot 的路径；在文件根外则回云端根 "/"。
+ */
+export function defaultUploadCloudDir(sourceAbs: string, fileRoot: string): string {
+  const rel = relative(fileRoot, dirname(sourceAbs));
+  // 在文件根外：相对路径以 ".." 开头或为绝对路径
+  if (rel === "") return "/";
+  if (isAbsolute(rel) || rel.split(/[/\\]/)[0] === "..") return "/";
+  return normalizeCloudPath(rel);
+}
+
+/**
+ * 下载落地本地绝对路径：fileRoot + 云端目录各段 + 文件名。
+ * name 经 basename 净化：encMeta 里的原文件名在分享他人 bundle 时可能被构造为
+ * 含 `../` 或路径分隔符的串，basename 只取最后一段，杜绝 pull 时逃逸文件根。
+ */
+export function downloadLocalPath(fileRoot: string, cloudDir: string, name: string): string {
+  const segs = normalizeCloudPath(cloudDir).split("/").filter(Boolean);
+  // 同时按正反斜杠取末段，防跨平台分隔符注入
+  const safeName = basename(name.replace(/\\/g, "/"));
+  // basename 后仍可能是 "." 或 ".."（恶意 encMeta.name），拒之防落到文件根之外/自身
+  if (safeName === "" || safeName === "." || safeName === "..") {
+    throw new InvalidArgError(`非法文件名（解密元数据可能被篡改）：${name}`);
+  }
+  return join(fileRoot, ...segs, safeName);
 }

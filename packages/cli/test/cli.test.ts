@@ -22,16 +22,21 @@ import { findSevenZip } from "../src/export7z.ts";
 let work: string;
 let localStore: string;
 
+let fileRoot: string;
+
 beforeAll(async () => {
   work = await mkdtemp(join(tmpdir(), "bizhou-cli-"));
   localStore = join(work, "store");
+  fileRoot = join(work, "fileroot");
   process.env.BIZHOU_CONFIG_DIR = join(work, "cfg");
   process.env.BIZHOU_MASTER_PASSWORD = "cli-test-pass";
+  process.env.BIZHOU_FILE_ROOT = fileRoot;
 });
 afterAll(async () => {
   await rm(work, { recursive: true, force: true });
   delete process.env.BIZHOU_CONFIG_DIR;
   delete process.env.BIZHOU_MASTER_PASSWORD;
+  delete process.env.BIZHOU_FILE_ROOT;
 });
 
 function sha256(b: Buffer): string {
@@ -71,9 +76,9 @@ describe("CLI 命令（离线 --local，真实命令代码）", () => {
     await cmdLs(rt, undefined, { local: localStore });
     await cmdInfo(rt, id, { local: localStore });
 
-    const outDir = join(work, "out");
-    await cmdPull(rt, id, { local: localStore, out: outDir });
-    const restored = await readFile(join(outDir, "私密.bin"));
+    // --out 现在是相对 rt.fileRoot（BIZHOU_FILE_ROOT）的子目录，而非绝对路径
+    await cmdPull(rt, id, { local: localStore, out: "out" });
+    const restored = await readFile(join(fileRoot, "out", "私密.bin"));
     expect(sha256(restored)).toBe(sha256(data)); // 字节级一致
 
     await cmdRm(rt, id, { local: localStore });

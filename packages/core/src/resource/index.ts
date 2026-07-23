@@ -159,3 +159,19 @@ export async function readResourceMeta(
   const dek = unwrapDek(mk, manifest.wrappedKey);
   return { manifest, meta: openMeta(dek, manifest.encMeta) };
 }
+
+/** 改 bundle 真名（重写 encMeta，分片和 wrappedKey 不动）。 */
+export async function renameResource(
+  mk: Buffer,
+  store: BundleStore,
+  newName: string,
+): Promise<void> {
+  const manifest = parseManifest(await store.getManifest());
+  const dek = unwrapDek(mk, manifest.wrappedKey);
+  const meta = openMeta(dek, manifest.encMeta);
+  const manifest2: Manifest = {
+    ...manifest,
+    encMeta: sealMeta(dek, { ...meta, name: newName }),
+  };
+  await store.putManifest(serializeManifest(manifest2));
+}

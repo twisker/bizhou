@@ -11,7 +11,7 @@
 
 ## 前端模块索引
 
-不适用（无图形界面）。首期为 CLI + 可嵌入库；未来 GUI 前端可复用 `@bizhou/core`。
+不适用。**本项目只做 CLI，不做 GUI 前端、不做移动端。** 核心库 `@bizhou/core` 保持无 UI 依赖、可嵌入（供 daemon/自动化等复用），但图形界面不在本项目范围。
 
 ---
 
@@ -33,7 +33,7 @@
 | events | 进度事件类型与回调 | PRD §5 | `packages/core/src/events/` | ✅ 稳定 |
 | index | 对外统一 API 出口 | — | `packages/core/src/index.ts` | ✅ 稳定 |
 | cloudpath | 云端路径纯函数（normalize/join/dirname/basename/split；**拒绝 `..` 防穿越**） | spec 2026-07-23 | `packages/core/src/cloudpath/` | ✅ 稳定（v2-P1） |
-| backend | 文件系统级 Backend 抽象 + LocalBackend + BaiduBackend（mkdir/listDir/bundleStore） | spec 2026-07-23 | `packages/core/src/backend/` | ✅ 稳定（v2-P1） |
+| backend | 文件系统级 Backend：mkdir/listDir/bundleStore/move/copy/rename/回收站（Local .trash + Baidu 原生） | spec 2026-07-23 | `packages/core/src/backend/` | ✅ 稳定（v2-P1） |
 
 ---
 
@@ -41,7 +41,7 @@
 
 | 模块 | 说明 | 设计文档 | 源代码目录 | 状态 |
 |------|------|---------|----------|------|
-| commands | init/unlock/lock/passwd/recover/login/logout/account/push/pull/ls/info/rm/share/preview | PRD §14 | `packages/cli/src/commands.ts` | ✅ 稳定 |
+| commands | init/unlock/lock/passwd/recover/login/logout/account/**mkdir**/ls(`-r`)/push(`--to`/`-r`)/pull(`-r`)/info/rm/share/preview/**mv**/**cp**(-r)/**rename**/**rm**(回收站)/**trash**；递归解析 + 上传下载映射 + 文件操作 | PRD §14 + spec 2026-07-23 | `packages/cli/src/commands.ts` | ✅ 稳定 |
 | runtime | .env 加载、配置目录、SecretStore/账号装配、MK 解析、Baidu 客户端（token 刷新） | 本仓库约定 | `packages/cli/src/runtime.ts` | ✅ 稳定 |
 | prompt | 隐藏口令输入、`--password-stdin`/环境变量 | PRD §14 | `packages/cli/src/prompt.ts` | ✅ 稳定 |
 | render | 颜色、进度条、字节格式化、退出码映射 | 本仓库约定 | `packages/cli/src/render.ts` | ✅ 稳定 |

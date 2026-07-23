@@ -115,7 +115,7 @@ bun $IDX pull <资源ID> --local /tmp/bz-store --out /tmp/bz-out   # 还原字�
 
 - **M0（Sprint 0）** — 技术验证：跑通 OAuth + 上传/下载往返字节一致，验证云端不限制加密大文件。
 - **M1（Phase 1）** — 核心库 + CLI 全 pipeline；预览、7z-AES 导出、多账号；>4GB 大文件与断点续传。
-- **Phase 2** — 生态与打磨：shell 补全、更多预览、daemon/定时备份、GUI 前端、进 homebrew-core/winget，远期移动端。
+- **Phase 2** — 生态与打磨（**仅 CLI 相关**）：shell 补全、更多预览、daemon/定时备份、进 homebrew-core/winget、worker_threads 并行加密。
 
 详见 `.claude/sprint-plan.md`。
 

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateBundleId } from "../src/bundle/index.ts";
 import { AuthError, BizhouError } from "../src/errors.ts";
-import { packResource, unpackResource } from "../src/resource/index.ts";
+import { packResource, unpackResource, readResourceMeta, renameResource } from "../src/resource/index.ts";
 import { LocalBundleStore, MemoryBundleStore } from "../src/store/index.ts";
 import { createVault, unlockWithPassword } from "../src/vault/index.ts";
 
@@ -136,5 +136,50 @@ describe("完整性与安全", () => {
     await packResource({ filePath: inPath, fileSize: 8000, mk: key, bundleId, createdAt: CREATED, chunkSize: 3000, compression: "gzip", store });
     await unpackResource({ mk: key, store, outPath });
     expect(sha256(await readFile(outPath))).toBe(sha256(data));
+  });
+});
+
+describe("renameResource（改 bundle 真名）", () => {
+  test("renameResource 更改名字、wrappedKey 和分片不变、unpack 字节一致", async () => {
+    const key = await mk();
+    const bundleId = generateBundleId();
+    const inPath = join(dir, `r-in-${bundleId}`);
+    const outPath = join(dir, `r-out-${bundleId}`);
+    const data = randomBytes(5000);
+    await writeFile(inPath, data);
+
+    const store = new LocalBundleStore(dir, bundleId);
+    const manifest1 = await packResource({
+      filePath: inPath,
+      fileSize: 5000,
+      mk: key,
+      bundleId,
+      createdAt: CREATED,
+      chunkSize: 1024,
+      compression: "none",
+      store,
+      name: "旧.bin",
+    });
+
+    // 记录原始 wrappedKey 和分片
+    const originalWrappedKey = manifest1.wrappedKey;
+    const originalChunks = manifest1.chunks;
+
+    // 执行重命名
+    await renameResource(key, store, "新.bin");
+
+    // 验证名字改了
+    const { meta, manifest: manifest2 } = await readResourceMeta(key, store);
+    expect(meta.name).toBe("新.bin");
+
+    // 验证 wrappedKey 和分片没变
+    expect(manifest2.wrappedKey).toBe(originalWrappedKey);
+    expect(manifest2.chunks).toEqual(originalChunks);
+
+    // 验证 unpack 仍字节一致
+    const { bytesWritten } = await unpackResource({ mk: key, store, outPath });
+    const out = await readFile(outPath);
+    expect(sha256(out)).toBe(sha256(data));
+    expect(bytesWritten).toBe(5000);
   });
 });
