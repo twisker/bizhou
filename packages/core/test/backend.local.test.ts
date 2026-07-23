@@ -159,4 +159,10 @@ describe("LocalBackend 回收站（.trash）", () => {
     const root = await be.listDir("/");
     expect(root.dirs).not.toContain(".trash");
   });
+
+  test("deleteTrash/restoreTrash 的 entryId 含 ../ 被拒（防 rm -rf 逃逸 .trash）", async () => {
+    const be = new LocalBackend(base3);
+    await expect(be.deleteTrash("../../evil")).rejects.toThrow();
+    await expect(be.restoreTrash("../../evil")).rejects.toThrow();
+  });
 });

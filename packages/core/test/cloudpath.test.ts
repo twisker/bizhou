@@ -72,6 +72,10 @@ describe("上传/下载映射", () => {
     expect(downloadLocalPath(fr, "/工作", "../../etc/passwd")).toBe(join(fr, "工作", "passwd"));
     expect(downloadLocalPath(fr, "/", "a\\b\\evil.bin")).toBe(join(fr, "evil.bin"));
   });
+  test("downloadLocalPath：basename 后为 . 或 .. 的恶意名被拒", () => {
+    expect(() => downloadLocalPath(fr, "/工作", "..")).toThrow(InvalidArgError);
+    expect(() => downloadLocalPath(fr, "/", "a/..")).toThrow(InvalidArgError);
+  });
 });
 
 describe("assertNameSegment", () => {

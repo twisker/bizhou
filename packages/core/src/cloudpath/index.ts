@@ -68,5 +68,9 @@ export function downloadLocalPath(fileRoot: string, cloudDir: string, name: stri
   const segs = normalizeCloudPath(cloudDir).split("/").filter(Boolean);
   // 同时按正反斜杠取末段，防跨平台分隔符注入
   const safeName = basename(name.replace(/\\/g, "/"));
+  // basename 后仍可能是 "." 或 ".."（恶意 encMeta.name），拒之防落到文件根之外/自身
+  if (safeName === "" || safeName === "." || safeName === "..") {
+    throw new InvalidArgError(`非法文件名（解密元数据可能被篡改）：${name}`);
+  }
   return join(fileRoot, ...segs, safeName);
 }

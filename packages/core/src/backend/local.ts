@@ -23,10 +23,12 @@ export class LocalBackend implements Backend {
   }
 
   private trashMetaPath(entryId: string): string {
+    assertNameSegment(entryId); // 防 entryId 含 ../ 逃逸 .trash（如 `bz trash rm ../../x`）
     return join(this.trashRoot, `${entryId}.json`);
   }
 
   private trashItemDir(entryId: string): string {
+    assertNameSegment(entryId);
     return join(this.trashRoot, entryId);
   }
 
