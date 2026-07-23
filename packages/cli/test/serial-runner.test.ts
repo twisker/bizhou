@@ -36,4 +36,25 @@ describe("SerialJobRunner 串行护栏", () => {
     await runner.drain();
     expect(runs).toBe(1);
   });
+
+  test("run() 抛错也不丢合并触发、drain 不 reject、running 复位", async () => {
+    let runs = 0;
+    const runner = new SerialJobRunner(async () => {
+      runs++;
+      await sleep(20);
+      throw new Error("boom"); // 每次都抛
+    });
+
+    runner.trigger(); // 第 1 次 → 跑（会抛）
+    await sleep(5);
+    runner.trigger(); // 运行中置脏 → 应补跑一次（即便前一次抛错）
+    // drain 必须 resolve（不因 run 抛错而 reject），否则 daemon 退出会挂死
+    await expect(runner.drain()).resolves.toBeUndefined();
+    expect(runs).toBe(2); // 抛错后仍消费了合并的补跑
+
+    // running 已复位：空闲 trigger 能再次立即跑
+    runner.trigger();
+    await runner.drain();
+    expect(runs).toBe(3);
+  });
 });

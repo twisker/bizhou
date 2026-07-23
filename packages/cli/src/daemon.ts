@@ -97,7 +97,13 @@ export class SerialJobRunner {
     try {
       do {
         this.dirty = false;
-        await this.run();
+        // run() 自负错误处理；此处兜住任何逃逸异常，确保：①运行中到达的 trigger（dirty）
+        // 仍被合并补跑、不丢失；②drain() 永不 reject（否则退出等待方 .then 不触发会挂死）。
+        try {
+          await this.run();
+        } catch {
+          /* 吞掉：不中断合并循环，也不让 current 变成 rejected promise */
+        }
       } while (this.dirty);
     } finally {
       this.running = false;
@@ -189,57 +195,63 @@ export async function cmdDaemon(rt: Runtime, opts: CommonOpts): Promise<void> {
     return;
   }
   const mk = await rt.resolveMk(opts); // 需已解锁或此处提示主密码
-  const contentKey = deriveContentKey(mk);
-  const backend = await makeBackend(rt, opts.local);
+  try {
+    const contentKey = deriveContentKey(mk);
+    const backend = await makeBackend(rt, opts.local);
 
-  // 每任务一个串行护栏
-  const runners = new Map<string, SerialJobRunner>();
-  for (const job of jobs) {
-    runners.set(
-      job.id,
-      new SerialJobRunner(async () => {
-        try {
-          const r = await sweepJob(rt, backend, mk, contentKey, job, (m) => info(m));
-          await updateLastBackup(rt.paths.dir, job.id, new Date(rt.now()).toISOString());
-          info(`任务 ${job.id}：上传 ${r.uploaded}，跳过 ${r.skipped}，失败 ${r.failed}`);
-        } catch (err) {
-          warn(`任务 ${job.id} 本轮出错（下次触发重试）：${(err as Error).message}`);
-        }
+    // 每任务一个串行护栏
+    const runners = new Map<string, SerialJobRunner>();
+    for (const job of jobs) {
+      runners.set(
+        job.id,
+        new SerialJobRunner(async () => {
+          try {
+            const r = await sweepJob(rt, backend, mk, contentKey, job, (m) => info(m));
+            await updateLastBackup(rt.paths.dir, job.id, new Date(rt.now()).toISOString());
+            info(`任务 ${job.id}：上传 ${r.uploaded}，跳过 ${r.skipped}，失败 ${r.failed}`);
+          } catch (err) {
+            warn(`任务 ${job.id} 本轮出错（下次触发重试）：${(err as Error).message}`);
+          }
+        }),
+      );
+    }
+
+    info(`daemon 启动：${jobs.length} 个任务，启动即扫...`);
+    for (const job of jobs) runners.get(job.id)?.trigger();
+    await Promise.all([...runners.values()].map((r) => r.drain())); // 等启动即扫完
+
+    const watchers = jobs.map((job) =>
+      watchRecursive(job.localDir, () => runners.get(job.id)?.trigger(), {
+        debounceMs: rt.daemonDebounceMs,
       }),
     );
+    const timer = setInterval(() => {
+      for (const job of jobs) runners.get(job.id)?.trigger();
+    }, rt.daemonSweepIntervalMs);
+
+    info(
+      `监听中（防抖 ${rt.daemonDebounceMs}ms，定时兜底 ${Math.round(rt.daemonSweepIntervalMs / 60000)}min）。Ctrl-C 退出。`,
+    );
+
+    await new Promise<void>((resolve) => {
+      let shutting = false;
+      const shutdown = (sig: string): void => {
+        if (shutting) return;
+        shutting = true;
+        info(`收到 ${sig}，停止 daemon（等在飞备份完成）...`);
+        for (const w of watchers) w.stop();
+        clearInterval(timer);
+        // .catch 兜底：即便某 runner 意外 reject（loop 已吞错，理论不会），也保证退出不挂死。
+        void Promise.all([...runners.values()].map((r) => r.drain()))
+          .catch(() => {})
+          .then(() => resolve());
+      };
+      // once：信号触发后自动摘除监听，避免同进程重复调用 cmdDaemon 时累积监听器。
+      process.once("SIGINT", () => shutdown("SIGINT"));
+      process.once("SIGTERM", () => shutdown("SIGTERM"));
+    });
+    ok("daemon 已退出。");
+  } finally {
+    mk.fill(0); // best-effort 抹除内存 MK（任何退出路径，含中途抛错）
   }
-
-  info(`daemon 启动：${jobs.length} 个任务，启动即扫...`);
-  for (const job of jobs) runners.get(job.id)?.trigger();
-  await Promise.all([...runners.values()].map((r) => r.drain())); // 等启动即扫完
-
-  const watchers = jobs.map((job) =>
-    watchRecursive(job.localDir, () => runners.get(job.id)?.trigger(), {
-      debounceMs: rt.daemonDebounceMs,
-    }),
-  );
-  const timer = setInterval(() => {
-    for (const job of jobs) runners.get(job.id)?.trigger();
-  }, rt.daemonSweepIntervalMs);
-
-  info(
-    `监听中（防抖 ${rt.daemonDebounceMs}ms，定时兜底 ${Math.round(rt.daemonSweepIntervalMs / 60000)}min）。Ctrl-C 退出。`,
-  );
-
-  await new Promise<void>((resolve) => {
-    let shutting = false;
-    const shutdown = (sig: string): void => {
-      if (shutting) return;
-      shutting = true;
-      info(`收到 ${sig}，停止 daemon（等在飞备份完成）...`);
-      for (const w of watchers) w.stop();
-      clearInterval(timer);
-      void Promise.all([...runners.values()].map((r) => r.drain())).then(() => resolve());
-    };
-    process.on("SIGINT", () => shutdown("SIGINT"));
-    process.on("SIGTERM", () => shutdown("SIGTERM"));
-  });
-
-  mk.fill(0); // best-effort 抹除内存 MK
-  ok("daemon 已退出。");
 }
