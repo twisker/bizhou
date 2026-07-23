@@ -83,13 +83,25 @@ class RecordingBundleStore implements BundleStore {
 /** 极简内存 Backend：只实现 pushOneFile/findDuplicateBundle 会用到的部分，其余方法本夹具不需要故未实现即抛错。 */
 class MemoryBackend implements Backend {
   private readonly byBundleId = new Map<string, { dir: string; store: RecordingBundleStore }>();
+  /** 已 mkdir 过的目录集合，供 strictListDir 模式判断"目录是否存在"。 */
+  private readonly createdDirs = new Set<string>(["/"]);
+  /**
+   * 是否模拟 BaiduBackend 的严格语义：对尚未创建的目录 listDir 直接抛错
+   * （真实 LocalBackend 对缺失目录容错返回空列表，但 BaiduBackend 会对非零 errno 抛 BizhouError）。
+   * 默认 false，保持既有测试的宽松行为；仅在需要复现"目录不存在"回归时开启。
+   */
+  constructor(private readonly strictListDir = false) {}
 
-  async mkdir(_cloudDir: string): Promise<void> {
-    // 内存后端无需真建目录。
+  async mkdir(cloudDir: string): Promise<void> {
+    // 内存后端无需真建目录，但需记录"已创建"以配合 strictListDir。
+    this.createdDirs.add(normalizeCloudPath(cloudDir));
   }
 
   async listDir(cloudDir: string): Promise<DirListing> {
     const dir = normalizeCloudPath(cloudDir);
+    if (this.strictListDir && !this.createdDirs.has(dir)) {
+      throw new BizhouError("IO", `目录不存在（模拟百度网盘 errno）：${dir}`);
+    }
     const bundles = [...this.byBundleId.entries()]
       .filter(([, v]) => v.dir === dir)
       .map(([id]) => ({ id, dir }));
@@ -183,11 +195,16 @@ export interface MemoryFixture {
   pull(bundleId: string, cloudDir: string, outPath: string): Promise<UnpackResult>;
 }
 
-export async function makeMemoryFixture(): Promise<MemoryFixture> {
+export interface MemoryFixtureOpts {
+  /** 见 MemoryBackend 构造参数说明：开启后 listDir 对未 mkdir 过的目录抛错，模拟 BaiduBackend。 */
+  strictListDir?: boolean;
+}
+
+export async function makeMemoryFixture(opts: MemoryFixtureOpts = {}): Promise<MemoryFixture> {
   const tmp = await mkdtemp(join(tmpdir(), "bizhou-push-fixture-"));
   const mk = randomBytes(32); // 固定长度 32B MK（内容与随机性对测试无关，只要求形状正确）
   const contentKey = deriveContentKey(mk);
-  const backend = new MemoryBackend();
+  const backend = new MemoryBackend(opts.strictListDir ?? false);
 
   const rt: Runtime = {
     paths: { dir: tmp, vault: "", secrets: "", deviceKey: "", config: "" },

@@ -336,6 +336,11 @@ export async function pushOneFile(
   const contentId = await hashPlaintextFile(absFile, contentKey);
   const jpath = journalPath(rt.paths.dir, "upload", contentId, cloudDir);
 
+  // 云端目录必须先于去重扫描创建：BaiduBackend.listDir 对不存在的目录会抛错，
+  // 若目录尚未创建（如全新账号首次推送、或递归 push 中尚未出现过的子目录），
+  // 去重扫描会先于 mkdir 报错，导致首次推送失败。
+  if (cloudDir !== "/") await backend.mkdir(cloudDir);
+
   // 1. 去重（--force 跳过）
   if (!opts.force) {
     const dup = await findDuplicateBundle(rt, backend, mk, cloudDir, contentId);
@@ -393,7 +398,6 @@ export async function pushOneFile(
 
   const totalChunks = Math.max(1, Math.ceil(st.size / chunkSize));
 
-  if (cloudDir !== "/") await backend.mkdir(cloudDir);
   const store = backend.bundleStore(bundleId, cloudDir);
 
   // 3. 写日志（上锁）

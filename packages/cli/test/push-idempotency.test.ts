@@ -105,6 +105,23 @@ describe("push 幂等/续传/锁（内存后端）", () => {
     }
   });
 
+  test("F1 回归：strict-listDir 后端下，首推全新云端目录仍成功（mkdir 先于去重扫描）", async () => {
+    // strictListDir 模拟 BaiduBackend：listDir 对尚未 mkdir 过的目录直接抛错（真实百度网盘的 errno 行为），
+    // 而非 LocalBackend 那样容错返回空列表。若 pushOneFile 仍是"先去重扫描、后 mkdir"的旧顺序，
+    // 本测试会在 findDuplicateBundle → backend.listDir 处直接抛错，从而暴露回归。
+    const fx = await makeMemoryFixture({ strictListDir: true });
+    try {
+      const f = join(fx.tmp, "fresh.bin");
+      await writeFile(f, Buffer.alloc(512, 7));
+      // "/全新目录" 从未被 mkdir 过：修复前会在去重扫描阶段抛 BizhouError；修复后 mkdir 先执行，成功上传。
+      const r = await fx.pushOneFile(f, "/全新目录", {});
+      expect(r.status).toBe("uploaded");
+      expect(await fx.countBundles("/全新目录")).toBe(1);
+    } finally {
+      await rm(fx.tmp, { recursive: true, force: true });
+    }
+  });
+
   test("--concurrency 非数字（NaN）回退为受限有限默认值", () => {
     const rt = { uploadConcurrency: 4 } as unknown as Runtime;
     // `bz --concurrency foo` → Number("foo") = NaN；不得传播为 NaN。
