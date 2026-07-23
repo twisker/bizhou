@@ -20,6 +20,7 @@ import {
   generateBundleId,
   generateSalt,
   groupBase32,
+  normalizeCloudPath,
   openPreview,
   packResource,
   parseManifest,
@@ -36,7 +37,13 @@ import { findSevenZip, sevenZipArchive } from "./export7z.ts";
 import { generatePreview } from "./preview.ts";
 import { readLineFromStdin, readPassword, resolveMasterPassword } from "./prompt.ts";
 import { c, endProgress, formatBytes, info, ok, out, renderProgress, warn } from "./render.ts";
-import { baiduClientForCurrent, createRuntime, makeStore, type Runtime } from "./runtime.ts";
+import {
+  baiduClientForCurrent,
+  createRuntime,
+  makeBackend,
+  makeStore,
+  type Runtime,
+} from "./runtime.ts";
 
 export interface CommonOpts {
   local?: string;
@@ -245,6 +252,7 @@ export async function cmdPush(
     noSplit?: boolean;
     name?: string;
     preview?: boolean;
+    to?: string;
   },
 ): Promise<string> {
   const st = await stat(filePath);
@@ -256,7 +264,10 @@ export async function cmdPush(
     : opts.chunk
       ? parseSize(opts.chunk)
       : DEFAULT_CHUNK_SIZE;
-  const store = await makeStore(rt, bundleId, opts.local);
+  const cloudDir = normalizeCloudPath(opts.to ?? "/");
+  const backend = await makeBackend(rt, opts.local);
+  if (opts.to) await backend.mkdir(cloudDir); // 目标目录不存在则建
+  const store = backend.bundleStore(bundleId, cloudDir);
 
   let preview: { kind: "video" | "audio" | "image"; data: Buffer } | undefined;
   if (opts.preview) {
@@ -344,22 +355,40 @@ async function resolveId(rt: Runtime, id: string, local: string | undefined): Pr
   return matches[0]!;
 }
 
-export async function cmdLs(rt: Runtime, opts: CommonOpts): Promise<void> {
+export async function cmdMkdir(rt: Runtime, cloudDir: string, opts: CommonOpts): Promise<void> {
+  const backend = await makeBackend(rt, opts.local);
+  await backend.mkdir(normalizeCloudPath(cloudDir));
+  ok(`已创建目录 ${normalizeCloudPath(cloudDir)}`);
+}
+
+export async function cmdLs(
+  rt: Runtime,
+  cloudDir: string | undefined,
+  opts: CommonOpts & { recursive?: boolean },
+): Promise<void> {
   const mk = await rt.resolveMk(opts);
-  const ids = await listBundleIds(rt, opts.local);
-  if (ids.length === 0) {
-    info("（空）");
-    return;
-  }
-  for (const id of ids) {
-    try {
-      const store = await makeStore(rt, id, opts.local);
-      const { meta } = await readResourceMeta(mk, store);
-      out(`${c.dim(id.slice(0, 12))}  ${formatBytes(meta.size).padStart(10)}  ${meta.name}`);
-    } catch {
-      out(`${c.dim(id.slice(0, 12))}  ${c.yellow("(无法读取 manifest)")}`);
+  const backend = await makeBackend(rt, opts.local);
+  const start = normalizeCloudPath(cloudDir ?? "/");
+
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    const listing = await backend.listDir(dir);
+    for (const d of listing.dirs.sort()) {
+      out(`${"  ".repeat(depth)}${c.cyan(`${d}/`)}`);
+      if (opts.recursive) await walk(dir === "/" ? `/${d}` : `${dir}/${d}`, depth + 1);
     }
-  }
+    for (const b of listing.bundles) {
+      try {
+        const store = backend.bundleStore(b.id, dir);
+        const { meta } = await readResourceMeta(mk, store);
+        out(
+          `${"  ".repeat(depth)}${c.dim(b.id.slice(0, 12))}  ${formatBytes(meta.size).padStart(10)}  ${meta.name}`,
+        );
+      } catch {
+        out(`${"  ".repeat(depth)}${c.dim(b.id.slice(0, 12))}  ${c.yellow("(无法读取)")}`);
+      }
+    }
+  };
+  await walk(start, 0);
 }
 
 export async function cmdInfo(rt: Runtime, id: string, opts: CommonOpts): Promise<void> {

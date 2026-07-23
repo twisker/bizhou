@@ -18,6 +18,7 @@ import {
   cmdLogin,
   cmdLogout,
   cmdLs,
+  cmdMkdir,
   cmdPasswd,
   cmdPreview,
   cmdPull,
@@ -47,9 +48,10 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
   account [list|use <n>|add <n>]               多账号管理
 
 资源:
-  push <path> [--chunk 100MB] [--compress] [--no-split] [--name <n>] [--preview]
+  push <path> [--chunk 100MB] [--compress] [--no-split] [--name <n>] [--preview] [--to <云端目录>]
   pull <id> [--out <dir>]
-  ls                       列出资源（显示真名，需已解锁）
+  mkdir <目录>             创建云端目录（mkdir -p 语义）
+  ls [目录] [-r]           列出目录（显示真名，需已解锁；-r 递归）
   info <id>                查看资源元数据
   rm <id>                  删除资源
   share <id> [--code|--7z] 生成分享码 / 导出 7z-AES（--7z 需 7z 二进制）
@@ -99,6 +101,8 @@ async function main(argv: string[]): Promise<number> {
       "7z": { type: "boolean" },
       ttl: { type: "string" },
       force: { type: "boolean" },
+      recursive: { type: "boolean", short: "r" },
+      to: { type: "string" },
     },
   });
 
@@ -156,14 +160,19 @@ async function main(argv: string[]): Promise<number> {
         noSplit: Boolean(values["no-split"]),
         name: values.name as string | undefined,
         preview: Boolean(values.preview),
+        to: values.to as string | undefined,
       });
       return 0;
     case "pull":
       if (!positionals[1]) throw new BizhouError("INVALID_ARG", "用法：bz pull <id>");
       await cmdPull(rt, positionals[1], { ...common, out: values.out as string | undefined });
       return 0;
+    case "mkdir":
+      if (!positionals[1]) throw new BizhouError("INVALID_ARG", "用法：bz mkdir <目录>");
+      await cmdMkdir(rt, positionals[1], common);
+      return 0;
     case "ls":
-      await cmdLs(rt, common);
+      await cmdLs(rt, positionals[1], { ...common, recursive: Boolean(values.recursive) });
       return 0;
     case "info":
       if (!positionals[1]) throw new BizhouError("INVALID_ARG", "用法：bz info <id>");

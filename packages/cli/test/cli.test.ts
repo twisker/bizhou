@@ -68,7 +68,7 @@ describe("CLI 命令（离线 --local，真实命令代码）", () => {
     expect(id).toMatch(/^[0-9a-f]{32}$/);
 
     // ls / info 不抛错
-    await cmdLs(rt, { local: localStore });
+    await cmdLs(rt, undefined, { local: localStore });
     await cmdInfo(rt, id, { local: localStore });
 
     const outDir = join(work, "out");
