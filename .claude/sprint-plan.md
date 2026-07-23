@@ -174,7 +174,7 @@
 | S1-T2 | `uploadPart` 4MB 分片限流池并发（默认 4，clamp[1,16]）+ AbortController fail-fast；`withRetry`/`uploadSlice` 支持 signal | AI | ⬜ 待开始 |
 | S1-T3 | 上传日志模块（`journal/`）：一份 JSON 兼作 在飞锁 + 续传状态；核心不读时钟（now/pid 注入） | AI | ⬜ 待开始 |
 | S1-T4 | manifest 缓存模块（`cache/`，只存加密态）+ `rename`/`rm`/`trash` 失效钩子 | AI | ⬜ 待开始 |
-| S1-T5 | `cmdPush` 集成：预哈希→去重（走缓存）→锁/续传→`--force`/`--concurrency`→消息；抽出共用 `pushOneFile` | AI | ⬜ 待开始 |
+| S1-T5 | `cmdPush` 集成：预哈希→去重（走缓存）→锁/续传→`--force`/`--concurrency`→消息；抽出共用 `pushOneFile` | AI | ✅ 已完成（2026-07-23） |
 | S1-T6 | `push -r` 递归复用 `pushOneFile`，整树去重/续传/锁一致 | AI | ⬜ 待开始 |
 
 **验收：** 新增 content/journal/cache 三模块单测 + push 幂等/续传/锁集成测试全绿；`bun test` 全量无回归；typecheck/lint/build 全过；安全红线（contentId 仅入加密 encMeta、日志/缓存无密钥、缓存键防穿越、GCM 失败即抛）自检通过。

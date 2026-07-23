@@ -34,6 +34,9 @@
 | index | 对外统一 API 出口 | — | `packages/core/src/index.ts` | ✅ 稳定 |
 | cloudpath | 云端路径纯函数（normalize/join/dirname/basename/split；**拒绝 `..` 防穿越**） | spec 2026-07-23 | `packages/core/src/cloudpath/` | ✅ 稳定（v2-P1） |
 | backend | 文件系统级 Backend：mkdir/listDir/bundleStore/move/copy/rename/回收站（Local .trash + Baidu 原生） | spec 2026-07-23 | `packages/core/src/backend/` | ✅ 稳定（v2-P1） |
+| content | 内容身份 `contentId`：`deriveContentKey(mk)`（HKDF 域分离）+ `hashPlaintextFile`/`hashPlaintextBuffer`（HMAC-SHA256，流式）；仅存加密 `encMeta`，绝不明文落盘/传网 | robust-upload-download-design 2026-07-23 | `packages/core/src/content/` | ✅ 稳定（S1-T1） |
+| journal | 上传/下载日志：一份 JSON 兼作在飞锁 + 续传状态（`journalPath`/`readJournal`/`writeJournal`/`appendDoneChunk`/`removeJournal`/`isLockAlive`）；核心不读时钟，now/pid/TTL 由 CLI 注入 | robust-upload-download-design 2026-07-23 | `packages/core/src/journal/` | ✅ 稳定（S1-T3） |
+| cache | manifest 本地缓存（只存加密态原文），消除去重扫描重复网络拉取；`getCachedManifest`/`putCachedManifest`/`invalidateManifest`，`rename`/`rm`/`trash` 已挂失效钩子 | robust-upload-download-design 2026-07-23 | `packages/core/src/cache/` | ✅ 稳定（S1-T4） |
 
 ---
 
@@ -41,8 +44,8 @@
 
 | 模块 | 说明 | 设计文档 | 源代码目录 | 状态 |
 |------|------|---------|----------|------|
-| commands | init/unlock/lock/passwd/recover/login/logout/account/**mkdir**/ls(`-r`)/push(`--to`/`-r`)/pull(`-r`)/info/rm/share/preview/**mv**/**cp**(-r)/**rename**/**rm**(回收站)/**trash**；递归解析 + 上传下载映射 + 文件操作 | PRD §14 + spec 2026-07-23 | `packages/cli/src/commands.ts` | ✅ 稳定 |
-| runtime | .env 加载、配置目录、SecretStore/账号装配、MK 解析、Baidu 客户端（token 刷新） | 本仓库约定 | `packages/cli/src/runtime.ts` | ✅ 稳定 |
+| commands | init/unlock/lock/passwd/recover/login/logout/account/**mkdir**/ls(`-r`)/push(`--to`/`-r`/**`--force`**/**`--concurrency`**)/pull(`-r`)/info/rm/share/preview/**mv**/**cp**(-r)/**rename**/**rm**(回收站)/**trash**；单文件上传内核 `pushOneFile`（预哈希→去重(`findDuplicateBundle`)→在飞锁/续传(journal)→`packResource`，`cmdPush` 与递归 push 共用）+ `resolveUploadConcurrency`/`pidAlive` | PRD §14 + robust-upload-download-design 2026-07-23 | `packages/cli/src/commands.ts` | ✅ 稳定（S1-T5） |
+| runtime | .env 加载、配置目录、SecretStore/账号装配、MK 解析、Baidu 客户端（token 刷新）+ `uploadConcurrency`（config.json 覆盖，clamp[1,16]，缺省 4） | 本仓库约定 | `packages/cli/src/runtime.ts` | ✅ 稳定（S1-T5） |
 | prompt | 隐藏口令输入、`--password-stdin`/环境变量 | PRD §14 | `packages/cli/src/prompt.ts` | ✅ 稳定 |
 | render | 颜色、进度条、字节格式化、退出码映射 | 本仓库约定 | `packages/cli/src/render.ts` | ✅ 稳定 |
 | preview（生成） | ffmpeg 图片/视频缩略、音频片段 | PRD §9 | `packages/cli/src/preview.ts` | ✅ 稳定 |
