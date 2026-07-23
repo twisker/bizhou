@@ -67,4 +67,8 @@ describe("上传/下载映射", () => {
     );
     expect(downloadLocalPath(fr, "/", "a.bin")).toBe(join(fr, "a.bin"));
   });
+  test("downloadLocalPath：净化 name，防含 ../ 或分隔符的原文件名逃逸文件根", () => {
+    expect(downloadLocalPath(fr, "/工作", "../../etc/passwd")).toBe(join(fr, "工作", "passwd"));
+    expect(downloadLocalPath(fr, "/", "a\\b\\evil.bin")).toBe(join(fr, "evil.bin"));
+  });
 });

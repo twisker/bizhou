@@ -3,7 +3,7 @@
  * 不碰 IO，供上传/下载映射与目录寻址复用。
  */
 
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { InvalidArgError } from "../errors.ts";
 
 /**
@@ -52,8 +52,14 @@ export function defaultUploadCloudDir(sourceAbs: string, fileRoot: string): stri
   return normalizeCloudPath(rel);
 }
 
-/** 下载落地本地绝对路径：fileRoot + 云端目录各段 + 文件名。 */
+/**
+ * 下载落地本地绝对路径：fileRoot + 云端目录各段 + 文件名。
+ * name 经 basename 净化：encMeta 里的原文件名在分享他人 bundle 时可能被构造为
+ * 含 `../` 或路径分隔符的串，basename 只取最后一段，杜绝 pull 时逃逸文件根。
+ */
 export function downloadLocalPath(fileRoot: string, cloudDir: string, name: string): string {
   const segs = normalizeCloudPath(cloudDir).split("/").filter(Boolean);
-  return join(fileRoot, ...segs, name);
+  // 同时按正反斜杠取末段，防跨平台分隔符注入
+  const safeName = basename(name.replace(/\\/g, "/"));
+  return join(fileRoot, ...segs, safeName);
 }
