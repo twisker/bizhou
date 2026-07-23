@@ -12,6 +12,7 @@ import {
   base32Decode,
   base32Encode,
   buildAuthorizeUrl,
+  bundleDirName,
   changePassword,
   createVault,
   DEFAULT_CHUNK_SIZE,
@@ -29,6 +30,7 @@ import {
   parseManifest,
   pollDeviceToken,
   readResourceMeta,
+  renameResource,
   startDeviceFlow,
   unlockWithPassword,
   unlockWithRecovery,
@@ -539,6 +541,78 @@ export async function cmdRm(rt: Runtime, id: string, opts: CommonOpts): Promise<
   const store = backend.bundleStore(fullId, dir);
   await store.remove();
   ok(`已删除资源 ${fullId}`);
+}
+
+// ---- mv / cp / rename ------------------------------------------------------
+
+/** 把 src 解析为云端路径：先当 bundle（id/12 位前缀）解析，失败则当目录路径处理。 */
+async function resolveSrcCloudPath(
+  rt: Runtime,
+  src: string,
+  local: string | undefined,
+): Promise<{ path: string; isBundle: boolean }> {
+  try {
+    const b = await resolveBundle(rt, src, local);
+    return { path: joinCloudPath(b.dir, bundleDirName(b.id)), isBundle: true };
+  } catch {
+    return { path: normalizeCloudPath(src), isBundle: false };
+  }
+}
+
+export async function cmdMv(
+  rt: Runtime,
+  src: string,
+  dstDir: string,
+  opts: CommonOpts,
+): Promise<void> {
+  const backend = await makeBackend(rt, opts.local);
+  const { path: srcPath } = await resolveSrcCloudPath(rt, src, opts.local);
+  const dst = normalizeCloudPath(dstDir);
+  await backend.mkdir(dst);
+  await backend.move(srcPath, dst);
+  ok(`已移动 ${srcPath} → ${dst}`);
+}
+
+export async function cmdCp(
+  rt: Runtime,
+  src: string,
+  dstDir: string,
+  opts: CommonOpts & { recursive?: boolean },
+): Promise<void> {
+  const backend = await makeBackend(rt, opts.local);
+  const { path: srcPath, isBundle } = await resolveSrcCloudPath(rt, src, opts.local);
+  if (!isBundle && !opts.recursive) {
+    throw new BizhouError("INVALID_ARG", "复制目录需 -r");
+  }
+  const dst = normalizeCloudPath(dstDir);
+  await backend.mkdir(dst);
+  await backend.copy(srcPath, dst);
+  ok(`已复制 ${srcPath} → ${dst}`);
+}
+
+export async function cmdRename(
+  rt: Runtime,
+  src: string,
+  newName: string,
+  opts: CommonOpts,
+): Promise<void> {
+  const backend = await makeBackend(rt, opts.local);
+  let bundle: { id: string; dir: string } | undefined;
+  try {
+    bundle = await resolveBundle(rt, src, opts.local);
+  } catch {
+    bundle = undefined;
+  }
+  if (bundle) {
+    const mk = await rt.resolveMk(opts);
+    const bundleStore = backend.bundleStore(bundle.id, bundle.dir);
+    await renameResource(mk, bundleStore, newName);
+    ok(`已改名 ${bundle.id} → ${newName}`);
+    return;
+  }
+  const srcPath = normalizeCloudPath(src);
+  await backend.rename(srcPath, newName);
+  ok(`已改名 ${srcPath} → ${newName}`);
 }
 
 // ---- share / preview -----------------------------------------------------

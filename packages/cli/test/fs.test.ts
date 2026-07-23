@@ -4,12 +4,15 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  cmdCp,
   cmdInfo,
   cmdInit,
   cmdLs,
   cmdMkdir,
+  cmdMv,
   cmdPull,
   cmdPush,
+  cmdRename,
   cmdRm,
   createRuntime,
 } from "../src/commands.ts";
@@ -158,6 +161,94 @@ test("push -r 对非目录报错", async () => {
   await writeFile(f, Buffer.from("x"));
   const rt = createRuntime();
   await expect(cmdPush(rt, f, { local: store, recursive: true })).rejects.toThrow();
+});
+
+/** 捕获 `process.stdout.write` 期间打印的所有文本（供 ls 断言真名/目录）。 */
+async function captureOut(fn: () => Promise<void>): Promise<string> {
+  const lines: string[] = [];
+  const orig = process.stdout.write.bind(process.stdout);
+  (process.stdout.write as unknown as (s: string) => boolean) = (s: string) => {
+    lines.push(String(s));
+    return true;
+  };
+  try {
+    await fn();
+  } finally {
+    process.stdout.write = orig;
+  }
+  return lines.join("");
+}
+
+describe("mv / cp / rename（本地后端）", () => {
+  test("cmdMv 移动 bundle：目标目录出现真名，源目录不再含该资源", async () => {
+    const rt = createRuntime();
+    const f = join(work, "移动我.bin");
+    await writeFile(f, Buffer.from("mv-data"));
+    const id = await cmdPush(rt, f, { local: store, to: "/x", name: "移动我.bin" });
+
+    await cmdMv(rt, id, "/y", { local: store });
+
+    const yText = await captureOut(() => cmdLs(rt, "/y", { local: store }));
+    expect(yText).toContain("移动我.bin");
+    const xText = await captureOut(() => cmdLs(rt, "/x", { local: store }));
+    expect(xText).not.toContain("移动我.bin");
+  });
+
+  test("cmdRename 目录：native 改名，ls 父目录显示新名不显示旧名", async () => {
+    const rt = createRuntime();
+    await cmdMkdir(rt, "/d1", { local: store });
+
+    await cmdRename(rt, "/d1", "d2", { local: store });
+
+    const text = await captureOut(() => cmdLs(rt, "/", { local: store }));
+    expect(text).toContain("d2");
+    expect(text).not.toMatch(/(^|[^d])d1\/(?!\d)/);
+  });
+
+  test("cmdRename bundle：改真名（重写 encMeta），info 显示新名，pull 仍字节一致", async () => {
+    const rt = createRuntime();
+    const data = randomBytes(2048);
+    const f = join(work, "旧名.bin");
+    await writeFile(f, data);
+    const id = await cmdPush(rt, f, { local: store, to: "/rn", name: "旧名.bin" });
+
+    await cmdRename(rt, id, "改名.bin", { local: store });
+
+    const infoText = await captureOut(() => cmdInfo(rt, id, { local: store }));
+    expect(infoText).toContain("改名.bin");
+
+    const fr = join(work, "fr-rename");
+    process.env.BIZHOU_FILE_ROOT = fr;
+    try {
+      const rt2 = createRuntime();
+      await cmdPull(rt2, id, { local: store, out: "out" });
+      const restored = await readFile(join(fr, "out", "改名.bin"));
+      expect(sha256(restored)).toBe(sha256(data));
+    } finally {
+      delete process.env.BIZHOU_FILE_ROOT;
+    }
+  });
+
+  test("cmdCp 复制 bundle：源目录与目标目录都含该资源", async () => {
+    const rt = createRuntime();
+    const data = randomBytes(1024);
+    const f = join(work, "复制我.bin");
+    await writeFile(f, data);
+    const id = await cmdPush(rt, f, { local: store, to: "/cpsrc", name: "复制我.bin" });
+
+    await cmdCp(rt, id, "/z", { local: store });
+
+    const srcText = await captureOut(() => cmdLs(rt, "/cpsrc", { local: store }));
+    expect(srcText).toContain("复制我.bin");
+    const dstText = await captureOut(() => cmdLs(rt, "/z", { local: store }));
+    expect(dstText).toContain("复制我.bin");
+  });
+
+  test("cmdCp 复制目录且未加 -r 应报错", async () => {
+    const rt = createRuntime();
+    await cmdMkdir(rt, "/cpdir", { local: store });
+    await expect(cmdCp(rt, "/cpdir", "/cpdir2", { local: store })).rejects.toThrow();
+  });
 });
 
 test("pull --out 也净化恶意 meta.name，防 ../ 逃逸文件根", async () => {
