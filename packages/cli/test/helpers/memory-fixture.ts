@@ -296,6 +296,8 @@ export async function makeMemoryFixture(opts: MemoryFixtureOpts = {}): Promise<M
     http: undefined as unknown as Runtime["http"], // pushOneFile 不使用 rt.http
     fileRoot: tmp,
     uploadConcurrency: 4,
+    daemonSweepIntervalMs: 30 * 60 * 1000,
+    daemonDebounceMs: 2_000,
     now: () => Date.now(),
     oauthConfig: () => {
       throw new BizhouError("IO", "内存夹具不支持 oauthConfig");
@@ -495,6 +497,8 @@ export async function makePullFixture(): Promise<PullFixture> {
     http: undefined as unknown as Runtime["http"], // pullOneBundle 不使用 rt.http
     fileRoot: tmp,
     uploadConcurrency: 4,
+    daemonSweepIntervalMs: 30 * 60 * 1000,
+    daemonDebounceMs: 2_000,
     now: () => Date.now(),
     oauthConfig: () => {
       throw new BizhouError("IO", "内存夹具不支持 oauthConfig");

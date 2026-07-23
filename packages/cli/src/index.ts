@@ -33,7 +33,7 @@ import {
   cmdUnlock,
   createRuntime,
 } from "./commands.ts";
-import { cmdBackup } from "./daemon.ts";
+import { cmdBackup, cmdDaemon } from "./daemon.ts";
 import { errorLine, exitCodeFor, info, out } from "./render.ts";
 
 const HELP = `敝帚 bz —— 客户端加密引擎 CLI
@@ -72,6 +72,7 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
   backup list                              列出备份任务
   backup rm <id>                           删除备份任务（不动云端已备份数据）
   backup run [<id>]                        手动执行一次备份（省略 id 跑全部）
+  daemon                                   前台守护：启动即扫 + 实时监听 + 定时兜底（Ctrl-C 退出）
 
 通用选项:
   --local <dir>            用本地目录代替百度网盘（离线测试/自建后端）
@@ -256,6 +257,9 @@ async function main(argv: string[]): Promise<number> {
         ...common,
         to: values.to as string | undefined,
       });
+      return 0;
+    case "daemon":
+      await cmdDaemon(rt, common);
       return 0;
     default:
       errorLine(`未知命令：${cmd}`);
