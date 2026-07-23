@@ -565,12 +565,58 @@ export async function cmdInfo(rt: Runtime, id: string, opts: CommonOpts): Promis
   if (meta.mtime) out(`原修改时间: ${meta.mtime}`);
 }
 
-export async function cmdRm(rt: Runtime, id: string, opts: CommonOpts): Promise<void> {
-  const { id: fullId, dir } = await resolveBundle(rt, id, opts.local);
+export async function cmdRm(
+  rt: Runtime,
+  src: string,
+  opts: CommonOpts & { recursive?: boolean; yes?: boolean },
+): Promise<void> {
   const backend = await makeBackend(rt, opts.local);
-  const store = backend.bundleStore(fullId, dir);
-  await store.remove();
-  ok(`已删除资源 ${fullId}`);
+  const b = await resolveBundleOrNull(rt, src, opts.local, backend);
+  const isBundle = b !== null;
+  const path = b ? joinCloudPath(b.dir, bundleDirName(b.id)) : normalizeCloudPath(src);
+  if (!isBundle && !opts.yes) {
+    throw new BizhouError("INVALID_ARG", `删除目录 ${path} 及其内容将进回收站，请加 --yes 确认`);
+  }
+  await backend.trashPath(path, new Date().toISOString());
+  ok(`已删除到回收站：${isBundle ? b.id : path}`);
+}
+
+export async function cmdTrash(
+  rt: Runtime,
+  sub: string | undefined,
+  arg: string | undefined,
+  opts: CommonOpts,
+): Promise<void> {
+  const backend = await makeBackend(rt, opts.local);
+  if (!sub || sub === "list") {
+    const entries = await backend.listTrash();
+    if (entries.length === 0) {
+      info("（回收站为空）");
+      return;
+    }
+    for (const e of entries) {
+      out(`${e.entryId}  ${e.name}  ${e.originalPath}  ${e.deletedAt}`);
+    }
+    return;
+  }
+  if (sub === "restore") {
+    if (!arg) throw new BizhouError("INVALID_ARG", "用法：bz trash restore <entryId>");
+    await backend.restoreTrash(arg);
+    ok(`已从回收站恢复：${arg}`);
+    return;
+  }
+  if (sub === "rm") {
+    if (!arg) throw new BizhouError("INVALID_ARG", "用法：bz trash rm <entryId>");
+    await backend.deleteTrash(arg);
+    ok(`已从回收站永久删除：${arg}`);
+    return;
+  }
+  if (sub === "clear") {
+    await backend.clearTrash();
+    ok("回收站已清空");
+    return;
+  }
+  throw new BizhouError("INVALID_ARG", `未知子命令：trash ${sub}`);
 }
 
 // ---- mv / cp / rename ------------------------------------------------------

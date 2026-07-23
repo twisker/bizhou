@@ -29,6 +29,7 @@ import {
   cmdRename,
   cmdRm,
   cmdShare,
+  cmdTrash,
   cmdUnlock,
   createRuntime,
 } from "./commands.ts";
@@ -56,7 +57,8 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
   mkdir <目录>             创建云端目录（mkdir -p 语义）
   ls [目录] [-r]           列出目录（显示真名，需已解锁；-r 递归）
   info <id>                查看资源元数据
-  rm <id>                  删除资源
+  rm <路径|id> [-r] [--yes]  删除到回收站（删除目录需 --yes 确认）
+  trash [list|restore <id>|rm <id>|clear]  回收站管理（列出/恢复/永久删除/清空）
   mv <src> <目标目录>       移动 bundle 或目录到目标目录下
   cp <src> <目标目录> [-r]  复制 bundle 或目录（目录需 -r）到目标目录下
   rename <src> <新名>       改名：bundle 改真名（重写 encMeta）/ 目录 native 改名
@@ -109,6 +111,7 @@ async function main(argv: string[]): Promise<number> {
       force: { type: "boolean" },
       recursive: { type: "boolean", short: "r" },
       to: { type: "string" },
+      yes: { type: "boolean" },
     },
   });
 
@@ -190,8 +193,16 @@ async function main(argv: string[]): Promise<number> {
       await cmdInfo(rt, positionals[1], common);
       return 0;
     case "rm":
-      if (!positionals[1]) throw new BizhouError("INVALID_ARG", "用法：bz rm <id>");
-      await cmdRm(rt, positionals[1], common);
+      if (!positionals[1])
+        throw new BizhouError("INVALID_ARG", "用法：bz rm <路径|id> [-r] [--yes]");
+      await cmdRm(rt, positionals[1], {
+        ...common,
+        recursive: Boolean(values.recursive),
+        yes: Boolean(values.yes),
+      });
+      return 0;
+    case "trash":
+      await cmdTrash(rt, positionals[1], positionals[2], common);
       return 0;
     case "mv":
       if (!positionals[1] || !positionals[2]) {

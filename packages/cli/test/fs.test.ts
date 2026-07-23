@@ -14,6 +14,7 @@ import {
   cmdPush,
   cmdRename,
   cmdRm,
+  cmdTrash,
   createRuntime,
   resolveBundleOrNull,
 } from "../src/commands.ts";
@@ -287,4 +288,81 @@ test("pull --out 也净化恶意 meta.name，防 ../ 逃逸文件根", async () 
   } finally {
     delete process.env.BIZHOU_FILE_ROOT;
   }
+});
+
+/** 同时捕获 stdout 与 stderr（按调用顺序拼接），供断言 trash list 的空提示（走 stderr）。 */
+async function captureAll(fn: () => Promise<void>): Promise<string> {
+  const lines: string[] = [];
+  const origOut = process.stdout.write.bind(process.stdout);
+  const origErr = process.stderr.write.bind(process.stderr);
+  (process.stdout.write as unknown as (s: string) => boolean) = (s: string) => {
+    lines.push(String(s));
+    return true;
+  };
+  (process.stderr.write as unknown as (s: string) => boolean) = (s: string) => {
+    lines.push(String(s));
+    return true;
+  };
+  try {
+    await fn();
+  } finally {
+    process.stdout.write = origOut;
+    process.stderr.write = origErr;
+  }
+  return lines.join("");
+}
+
+describe("rm 进回收站 + trash 管理（本地后端）", () => {
+  test("cmdRm(bundle) 进回收站：ls 不再含，trash list 含该名，restore 后 ls 又含", async () => {
+    const rt = createRuntime();
+    const f = join(work, "待删.bin");
+    await writeFile(f, Buffer.from("trash-me"));
+    const id = await cmdPush(rt, f, { local: store, to: "/t", name: "待删.bin" });
+
+    await cmdRm(rt, id, { local: store });
+
+    const afterRmText = await captureOut(() => cmdLs(rt, "/t", { local: store }));
+    expect(afterRmText).not.toContain("待删.bin");
+
+    const listText = await captureOut(() => cmdTrash(rt, "list", undefined, { local: store }));
+    // 回收站条目名是加密后的 bundle 目录名（<id>.bz，本地后端不解密真名），含 id 即可定位。
+    expect(listText).toContain(id);
+
+    // 从 trash list 输出里取出 entryId（每行首列）
+    const entryLine = listText.split("\n").find((l) => l.includes(id));
+    expect(entryLine).toBeDefined();
+    const entryId = entryLine?.trim().split(/\s+/)[0];
+    expect(entryId).toBeTruthy();
+
+    await cmdTrash(rt, "restore", entryId, { local: store });
+
+    const afterRestoreText = await captureOut(() => cmdLs(rt, "/t", { local: store }));
+    expect(afterRestoreText).toContain("待删.bin");
+  });
+
+  test("cmdRm(目录) 无 --yes 应报错；加 --yes 成功进回收站", async () => {
+    const rt = createRuntime();
+    await cmdMkdir(rt, "/dd", { local: store });
+
+    await expect(cmdRm(rt, "/dd", { local: store })).rejects.toThrow();
+
+    await cmdRm(rt, "/dd", { local: store, yes: true });
+
+    const rootText = await captureOut(() => cmdLs(rt, "/", { local: store }));
+    expect(rootText).not.toMatch(/(^|[^d])dd\/(?!\d)/);
+  });
+
+  test("cmdTrash clear 清空回收站", async () => {
+    const rt = createRuntime();
+    await cmdMkdir(rt, "/clear-me", { local: store });
+    await cmdRm(rt, "/clear-me", { local: store, yes: true });
+
+    const beforeClear = await captureAll(() => cmdTrash(rt, "list", undefined, { local: store }));
+    expect(beforeClear).not.toContain("（回收站为空）");
+
+    await cmdTrash(rt, "clear", undefined, { local: store });
+
+    const afterClear = await captureAll(() => cmdTrash(rt, "list", undefined, { local: store }));
+    expect(afterClear).toContain("（回收站为空）");
+  });
 });
