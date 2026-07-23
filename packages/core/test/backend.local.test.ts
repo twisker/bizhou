@@ -91,3 +91,72 @@ describe("LocalBackend move/copy/rename（目录级）", () => {
     await expect(be.rename("/some", "../escape")).rejects.toThrow();
   });
 });
+
+describe("LocalBackend 回收站（.trash）", () => {
+  let base3: string;
+  beforeAll(async () => {
+    base3 = await mkdtemp(join(tmpdir(), "bizhou-be-trash-"));
+  });
+  afterAll(async () => {
+    await rm(base3, { recursive: true, force: true });
+  });
+
+  test("trashPath 移出 /a、listTrash 记一条 originalPath=/a、restoreTrash 恢复；listDir 不含 .trash", async () => {
+    const be = new LocalBackend(base3);
+    await be.mkdir("/a");
+    await be.bundleStore("deadbeef", "/a").putManifest("{}");
+
+    await be.trashPath("/a", "2026-07-23T00:00:00Z");
+
+    const rootAfterTrash = await be.listDir("/");
+    expect(rootAfterTrash.dirs).not.toContain("a");
+    expect(rootAfterTrash.dirs).not.toContain(".trash");
+
+    const trashList = await be.listTrash();
+    expect(trashList.length).toBe(1);
+    expect(trashList[0]?.originalPath).toBe("/a");
+    expect(trashList[0]?.name).toBe("a");
+    expect(trashList[0]?.deletedAt).toBe("2026-07-23T00:00:00Z");
+    expect(typeof trashList[0]?.entryId).toBe("string");
+    expect(trashList[0]?.entryId.length).toBeGreaterThan(0);
+
+    const entryId = trashList[0]?.entryId as string;
+    await be.restoreTrash(entryId);
+
+    const rootAfterRestore = await be.listDir("/");
+    expect(rootAfterRestore.dirs).toContain("a");
+    expect(await be.listTrash()).toEqual([]);
+  });
+
+  test("deleteTrash 删单条、clearTrash 清空全部", async () => {
+    const be = new LocalBackend(base3);
+    await be.mkdir("/b");
+    await be.mkdir("/c");
+
+    await be.trashPath("/b", "2026-07-23T01:00:00Z");
+    await be.trashPath("/c", "2026-07-23T02:00:00Z");
+
+    let list = await be.listTrash();
+    expect(list.length).toBe(2);
+
+    const bEntry = list.find((e) => e.originalPath === "/b");
+    expect(bEntry).toBeDefined();
+    await be.deleteTrash((bEntry as (typeof list)[number]).entryId);
+
+    list = await be.listTrash();
+    expect(list.length).toBe(1);
+    expect(list[0]?.originalPath).toBe("/c");
+
+    await be.clearTrash();
+    expect(await be.listTrash()).toEqual([]);
+  });
+
+  test("listDir('/') 从不包含 .trash 目录本身", async () => {
+    const be = new LocalBackend(base3);
+    await be.mkdir("/d");
+    await be.trashPath("/d", "2026-07-23T03:00:00Z");
+
+    const root = await be.listDir("/");
+    expect(root.dirs).not.toContain(".trash");
+  });
+});
