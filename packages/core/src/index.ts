@@ -5,6 +5,7 @@
 
 export * from "./account/index.ts";
 export * from "./backend/index.ts";
+export * from "./backup/index.ts";
 export * from "./baidu/index.ts";
 export * from "./bundle/index.ts";
 export * from "./cache/index.ts";
