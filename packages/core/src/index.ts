@@ -7,6 +7,7 @@ export * from "./account/index.ts";
 export * from "./backend/index.ts";
 export * from "./baidu/index.ts";
 export * from "./bundle/index.ts";
+export * from "./cache/index.ts";
 export * from "./chunker/index.ts";
 export * from "./cloudpath/index.ts";
 export * from "./config/index.ts";

@@ -9,6 +9,7 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
   type Backend,
   BizhouError,
+  BUNDLE_SUFFIX,
   base32Decode,
   base32Encode,
   buildAuthorizeUrl,
@@ -23,6 +24,7 @@ import {
   generateBundleId,
   generateSalt,
   groupBase32,
+  invalidateManifest,
   joinCloudPath,
   normalizeCloudPath,
   openPreview,
@@ -578,6 +580,7 @@ export async function cmdRm(
     throw new BizhouError("INVALID_ARG", `删除目录 ${path} 及其内容将进回收站，请加 --yes 确认`);
   }
   await backend.trashPath(path, new Date().toISOString());
+  if (isBundle) await invalidateManifest(rt.paths.dir, b.id);
   ok(`已删除到回收站：${isBundle ? b.id : path}`);
 }
 
@@ -607,12 +610,19 @@ export async function cmdTrash(
   }
   if (sub === "rm") {
     if (!arg) throw new BizhouError("INVALID_ARG", "用法：bz trash rm <entryId>");
+    const entries = await backend.listTrash();
+    const entry = entries.find((e) => e.entryId === arg);
     await backend.deleteTrash(arg);
+    if (entry?.name.endsWith(BUNDLE_SUFFIX)) {
+      await invalidateManifest(rt.paths.dir, entry.name.slice(0, -BUNDLE_SUFFIX.length));
+    }
     ok(`已从回收站永久删除：${arg}`);
     return;
   }
   if (sub === "clear") {
     await backend.clearTrash();
+    // clear 时涉及的 bundleId 不易逐一枚举：直接清空整个 manifest 缓存目录（简单且安全，最坏情况只是下次重新拉取）。
+    await rm(join(rt.paths.dir, ".cache", "manifests"), { recursive: true, force: true });
     ok("回收站已清空");
     return;
   }
@@ -667,6 +677,7 @@ export async function cmdRename(
     const mk = await rt.resolveMk(opts);
     const bundleStore = backend.bundleStore(b.id, b.dir);
     await renameResource(mk, bundleStore, newName);
+    await invalidateManifest(rt.paths.dir, b.id); // 改名改了 encMeta，须失效缓存
     ok(`已改名 ${b.id} → ${newName}`);
     return;
   }
