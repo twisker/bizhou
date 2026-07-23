@@ -107,8 +107,9 @@ bun $IDX pull <资源ID> --local /tmp/bz-store --out /tmp/bz-out   # 还原字�
 
 ## 状态
 
-- ✅ **已完成（离线可验证）**：加密内核（AES-256-GCM 信封 + scrypt + MK/恢复密钥）、bundle/manifest、分片器、完整加密往返（字节级一致）、百度对接层（mock 测试）、多账号、CLI 全命令、ffmpeg 预览、7z-AES 导出、三平台 CI。
-- ⏳ **待人工联网验证**：M0 真实 OAuth + 上传/下载往返 + 确认云端不限制加密大文件、QPS/配额实测、真实 >4GB 断点续传、第三方 7-Zip 解密验证。见 `人工TODO事项.md`。
+- ✅ **M0 已通过（真实百度网盘）**：500MB 加密文件上传→下载→**字节级一致**，云端未限制/封禁加密大文件（全案前提成立）。实测上行 ≈5.5MB/s、下行 ≈1.1MB/s。
+- ✅ **M1 功能完成**：加密内核（AES-256-GCM 信封 + scrypt + MK/恢复密钥）、bundle/manifest、分片器、完整加密往返（含 >4GB 本地实证 4.29GiB→44 片）、百度对接、多账号、CLI 全命令、ffmpeg 预览、7z-AES 导出、构建/lint/打包、三平台 CI。
+- ⏳ **待人工**：发布（生成的 Homebrew/Scoop manifest 已就绪，需渠道账号 + GitHub Release）。
 
 ## 路线图
 
