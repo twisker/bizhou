@@ -9,6 +9,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AccountManager,
+  type Backend,
+  BaiduBackend,
   BaiduBundleStore,
   BaiduClient,
   type BundleStore,
@@ -16,9 +18,11 @@ import {
   configPaths,
   FileSecretStore,
   type HttpClient,
+  LocalBackend,
   LocalBundleStore,
   type OAuthConfig,
   refreshAccessToken,
+  resolveFileRoot,
   unlockWithPassword,
   VaultError,
   type VaultFile,
@@ -57,6 +61,7 @@ export interface Runtime {
   readonly paths: ConfigPaths;
   readonly accounts: AccountManager;
   readonly http: HttpClient;
+  readonly fileRoot: string;
   now(): number;
   oauthConfig(): OAuthConfig;
   loadVault(): Promise<VaultFile>;
@@ -75,10 +80,21 @@ export function createRuntime(): Runtime {
   const secrets = new FileSecretStore(paths.dir, paths.secrets, paths.deviceKey);
   const accounts = new AccountManager(secrets);
 
+  // 读 config.json 里的 fileRoot（若有）
+  let configFileRoot: string | undefined;
+  try {
+    const cfg = JSON.parse(readFileSync(paths.config, "utf8")) as { fileRoot?: string };
+    configFileRoot = cfg.fileRoot;
+  } catch {
+    /* 无 config.json，忽略 */
+  }
+  const fileRoot = resolveFileRoot(process.env, process.platform, configFileRoot);
+
   return {
     paths,
     accounts,
     http: httpAdapter,
+    fileRoot,
     now: () => Date.now(),
     oauthConfig(): OAuthConfig {
       const appKey = process.env.BAIDU_APP_KEY;
@@ -140,4 +156,10 @@ export async function makeStore(
 ): Promise<BundleStore> {
   if (localDir) return new LocalBundleStore(localDir, bundleId);
   return new BaiduBundleStore(await baiduClientForCurrent(rt), bundleId);
+}
+
+/** 按 --local 选后端：本地目录 or 百度。 */
+export async function makeBackend(rt: Runtime, localDir: string | undefined): Promise<Backend> {
+  if (localDir) return new LocalBackend(localDir);
+  return new BaiduBackend(await baiduClientForCurrent(rt));
 }
