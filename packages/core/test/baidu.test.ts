@@ -265,6 +265,57 @@ describe("BaiduBundleStore 端到端（模拟网盘 + 真实加密管线）", ()
   });
 });
 
+describe("filemanager move/copy/rename", () => {
+  test("move: opera=move，filelist 含 path/dest/newname=basename", async () => {
+    let seenUrl = "";
+    let seenBody = "";
+    const http: HttpClient = async (url, init) => {
+      seenUrl = url;
+      seenBody = String(init?.body);
+      return jsonRes({ errno: 0 });
+    };
+    await new BaiduClient(CONFIG, "AT", http).move(`${APP_ROOT}/a/x.bz`, `${APP_ROOT}/b`);
+    expect(seenUrl).toContain("method=filemanager");
+    expect(seenUrl).toContain("opera=move");
+    const filelist = JSON.parse(decodeURIComponent(seenBody).match(/filelist=([^&]+)/)![1]!);
+    expect(filelist).toEqual([
+      { path: `${APP_ROOT}/a/x.bz`, dest: `${APP_ROOT}/b`, newname: "x.bz" },
+    ]);
+  });
+
+  test("copy: opera=copy，filelist 含 path/dest/newname=basename", async () => {
+    let seenUrl = "";
+    let seenBody = "";
+    const http: HttpClient = async (url, init) => {
+      seenUrl = url;
+      seenBody = String(init?.body);
+      return jsonRes({ errno: 0 });
+    };
+    await new BaiduClient(CONFIG, "AT", http).copy(`${APP_ROOT}/a/x.bz`, `${APP_ROOT}/z`);
+    expect(seenUrl).toContain("method=filemanager");
+    expect(seenUrl).toContain("opera=copy");
+    const filelist = JSON.parse(decodeURIComponent(seenBody).match(/filelist=([^&]+)/)![1]!);
+    expect(filelist).toEqual([
+      { path: `${APP_ROOT}/a/x.bz`, dest: `${APP_ROOT}/z`, newname: "x.bz" },
+    ]);
+  });
+
+  test("rename: opera=rename，filelist 只含 path/newname（无 dest）", async () => {
+    let seenUrl = "";
+    let seenBody = "";
+    const http: HttpClient = async (url, init) => {
+      seenUrl = url;
+      seenBody = String(init?.body);
+      return jsonRes({ errno: 0 });
+    };
+    await new BaiduClient(CONFIG, "AT", http).rename(`${APP_ROOT}/a/x.bz`, "y.bz");
+    expect(seenUrl).toContain("method=filemanager");
+    expect(seenUrl).toContain("opera=rename");
+    const filelist = JSON.parse(decodeURIComponent(seenBody).match(/filelist=([^&]+)/)![1]!);
+    expect(filelist).toEqual([{ path: `${APP_ROOT}/a/x.bz`, newname: "y.bz" }]);
+  });
+});
+
 describe("mkdir + BaiduBundleStore cloudDir", () => {
   test("mkdir 走 create isdir=1，路径正确", async () => {
     let seenBody = "";

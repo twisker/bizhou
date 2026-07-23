@@ -12,6 +12,12 @@ export interface Backend {
   listDir(cloudDir: string): Promise<DirListing>;
   /** 取某目录下某 bundle 的读写句柄。 */
   bundleStore(bundleId: string, cloudDir: string): BundleStore;
+  /** 移动 srcCloudPath（目录或 bundle 文件夹）到 dstDir 下，保留原末段名。 */
+  move(srcCloudPath: string, dstDir: string): Promise<void>;
+  /** 复制 srcCloudPath 到 dstDir 下，保留原末段名；源保留。 */
+  copy(srcCloudPath: string, dstDir: string): Promise<void>;
+  /** 原地改名（同目录下改末段名）。 */
+  rename(srcCloudPath: string, newName: string): Promise<void>;
 }
 
 export { BaiduBackend } from "./baidu.ts";

@@ -1,7 +1,7 @@
-import { mkdir, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { cp, mkdir, readdir, rename } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { BUNDLE_SUFFIX } from "../bundle/index.ts";
-import { normalizeCloudPath } from "../cloudpath/index.ts";
+import { cloudBasename, normalizeCloudPath } from "../cloudpath/index.ts";
 import { LocalBundleStore } from "../store/index.ts";
 import type { Backend, DirListing } from "./index.ts";
 
@@ -41,5 +41,22 @@ export class LocalBackend implements Backend {
 
   bundleStore(bundleId: string, cloudDir: string): LocalBundleStore {
     return new LocalBundleStore(this.abs(cloudDir), bundleId);
+  }
+
+  async move(srcCloudPath: string, dstDir: string): Promise<void> {
+    const base = cloudBasename(normalizeCloudPath(srcCloudPath));
+    await mkdir(this.abs(dstDir), { recursive: true });
+    await rename(this.abs(srcCloudPath), join(this.abs(dstDir), base));
+  }
+
+  async copy(srcCloudPath: string, dstDir: string): Promise<void> {
+    const base = cloudBasename(normalizeCloudPath(srcCloudPath));
+    await mkdir(this.abs(dstDir), { recursive: true });
+    await cp(this.abs(srcCloudPath), join(this.abs(dstDir), base), { recursive: true });
+  }
+
+  async rename(srcCloudPath: string, newName: string): Promise<void> {
+    const absSrc = this.abs(srcCloudPath);
+    await rename(absSrc, join(dirname(absSrc), newName));
   }
 }

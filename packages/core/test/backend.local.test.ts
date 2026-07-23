@@ -1,8 +1,17 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalBackend } from "../src/backend/local.ts";
+
+async function exists(p: string): Promise<boolean> {
+  try {
+    await stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 let base: string;
 beforeAll(async () => {
@@ -36,5 +45,42 @@ describe("LocalBackend", () => {
   test("mkdir 拒绝 '..' 路径穿越，无法在 baseDir 外创建目录", async () => {
     const be = new LocalBackend(base);
     await expect(be.mkdir("/../escape")).rejects.toThrow();
+  });
+});
+
+describe("LocalBackend move/copy/rename（目录级）", () => {
+  let base2: string;
+  beforeAll(async () => {
+    base2 = await mkdtemp(join(tmpdir(), "bizhou-be-mv-"));
+  });
+  afterAll(async () => {
+    await rm(base2, { recursive: true, force: true });
+  });
+
+  test("move: /a（含 x.bz）移到 /b → /b/a 存在且含 bundle，/a 不再存在", async () => {
+    const be = new LocalBackend(base2);
+    await be.mkdir("/a");
+    await be.bundleStore("x", "/a").putManifest("{}");
+
+    await be.move("/a", "/b");
+
+    expect(await exists(join(base2, "b", "a", "x.bz", "manifest.json"))).toBe(true);
+    expect(await exists(join(base2, "a"))).toBe(false);
+  });
+
+  test("copy: /b/a 复制到 /c → 源 /b/a 保留、目标 /c/a 新增", async () => {
+    const be = new LocalBackend(base2);
+    await be.copy("/b/a", "/c");
+
+    expect(await exists(join(base2, "b", "a", "x.bz", "manifest.json"))).toBe(true);
+    expect(await exists(join(base2, "c", "a", "x.bz", "manifest.json"))).toBe(true);
+  });
+
+  test("rename: /b/a 改名 a2 → /b/a2 存在，/b/a 不再存在", async () => {
+    const be = new LocalBackend(base2);
+    await be.rename("/b/a", "a2");
+
+    expect(await exists(join(base2, "b", "a2", "x.bz", "manifest.json"))).toBe(true);
+    expect(await exists(join(base2, "b", "a"))).toBe(false);
   });
 });

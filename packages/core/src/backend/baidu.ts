@@ -36,4 +36,16 @@ export class BaiduBackend implements Backend {
   bundleStore(bundleId: string, cloudDir: string): BaiduBundleStore {
     return new BaiduBundleStore(this.client, bundleId, cloudDir);
   }
+
+  async move(srcCloudPath: string, dstDir: string): Promise<void> {
+    await this.client.move(this.remote(srcCloudPath), this.remote(dstDir));
+  }
+
+  async copy(srcCloudPath: string, dstDir: string): Promise<void> {
+    await this.client.copy(this.remote(srcCloudPath), this.remote(dstDir));
+  }
+
+  async rename(srcCloudPath: string, newName: string): Promise<void> {
+    await this.client.rename(this.remote(srcCloudPath), newName);
+  }
 }
