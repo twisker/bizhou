@@ -6,8 +6,9 @@
 
 ## 当前测试结果（2026-07-23）
 
-- `bun test`：**76 项全绿 + 1 skip**（10 文件），`pnpm run typecheck` 双包通过，`biome check` 无 error。
-- 测试文件：`packages/core/test/{crypto,base32,vault,bundle,resource,baidu,account,preview,baidu.live}.test.ts`、`packages/cli/test/cli.test.ts`（baidu.live 需 `BIZHOU_LIVE=1` + token，默认 skip）。
+- `bun test`：**94 项全绿 + 1 skip**（15 文件），`pnpm run typecheck` 双包通过，`biome check` 无 error，`pnpm run build` 产 3 份产物。
+- 测试文件：core `{crypto,base32,vault,bundle,resource,baidu,account,preview,baidu.live,config,cloudpath,backend.local,backend.baidu}.test.ts` + cli `{cli,fs}.test.ts`（baidu.live 需 `BIZHOU_LIVE=1`+token，默认 skip；cli.test 的 7z 测试无 7z 时 skip）。
+- **v2-Phase 1 新增覆盖**：config 双根解析、cloudpath 纯函数（含 `..` 拒绝防穿越）、Backend/LocalBackend/BaiduBackend（mkdir/listDir/bundleStore）、CLI `bz mkdir`/`ls -r`/`push --to` 离线端到端。
 - 关键覆盖：AES-GCM 往返 + 篡改/错密钥/AAD 失败、KDF/信封、vault 双路解锁 + 改密、manifest 严格校验、**资源 pack→unpack 字节级往返**（单/多片/整除/空/gzip/3MB/内存 store）、篡改分片与错 MK 被拒、百度上传编排（partseq/md5/断点续传/errno）+ 模拟网盘端到端、多账号 + 设备密钥加密落盘、预览加密往返。
 - 端到端实测（真实 `bz` 二进制，离线 `--local`）：push→pull 字节级一致、篡改被拒、错主密码被拒、ffmpeg 预览生成→加密→还原为有效 JPEG。
 - **>4GB 实测**：4.29 GiB 文件 → 44 个 100MB 逻辑分片 → 还原 **SHA-256 字节级一致**（push 6s / pull 7s）。证明"逻辑分片规避云端 4GB 单文件上限"成立；每分片 ≤100MB。

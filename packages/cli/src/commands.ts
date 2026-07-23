@@ -370,13 +370,16 @@ export async function cmdLs(
   const backend = await makeBackend(rt, opts.local);
   const start = normalizeCloudPath(cloudDir ?? "/");
 
+  let printedAny = false;
   const walk = async (dir: string, depth: number): Promise<void> => {
     const listing = await backend.listDir(dir);
     for (const d of listing.dirs.sort()) {
+      printedAny = true;
       out(`${"  ".repeat(depth)}${c.cyan(`${d}/`)}`);
       if (opts.recursive) await walk(dir === "/" ? `/${d}` : `${dir}/${d}`, depth + 1);
     }
     for (const b of listing.bundles) {
+      printedAny = true;
       try {
         const store = backend.bundleStore(b.id, dir);
         const { meta } = await readResourceMeta(mk, store);
@@ -389,6 +392,7 @@ export async function cmdLs(
     }
   };
   await walk(start, 0);
+  if (!printedAny) info("（空）");
 }
 
 export async function cmdInfo(rt: Runtime, id: string, opts: CommonOpts): Promise<void> {

@@ -29,11 +29,11 @@
 | preview（加密/解密） | 预览包用 DEK 加密存 preview.part、openPreview 还原（**生成 ffmpeg 在 CLI 层**） | PRD §9 | `packages/core/src/resource/index.ts` | ✅ 稳定 |
 | account | 多账号 token、当前账号、解锁 MK 缓存 | PRD §12 | `packages/core/src/account/` | ✅ 稳定 |
 | keystore | SecretStore 接口 + FileSecretStore（设备密钥 AES-GCM 加密落盘）+ Memory | PRD §7.3/§12 | `packages/core/src/keystore/` | ✅ 稳定 |
-| config | 配置目录/根解析（env/platform 注入，纯函数） | 本仓库约定 | `packages/core/src/config/` | ✅ 稳定 |
+| config | 配置根解析：**密钥根 `~/.bizhou` + 文件根=下载目录（均可配）**（env/platform 注入，纯函数） | 本仓库约定 / spec 2026-07-23 | `packages/core/src/config/` | ✅ 稳定 |
 | events | 进度事件类型与回调 | PRD §5 | `packages/core/src/events/` | ✅ 稳定 |
 | index | 对外统一 API 出口 | — | `packages/core/src/index.ts` | ✅ 稳定 |
-| cloudpath（规划中） | 云端路径纯函数（v2 目录树） | spec 2026-07-23 | `packages/core/src/cloudpath/`（待建） | 📋 Phase 1 计划 |
-| backend（规划中） | 文件系统级 Backend（Local/Baidu，v2 目录树） | spec 2026-07-23 | `packages/core/src/backend/`（待建） | 📋 Phase 1 计划 |
+| cloudpath | 云端路径纯函数（normalize/join/dirname/basename/split；**拒绝 `..` 防穿越**） | spec 2026-07-23 | `packages/core/src/cloudpath/` | ✅ 稳定（v2-P1） |
+| backend | 文件系统级 Backend 抽象 + LocalBackend + BaiduBackend（mkdir/listDir/bundleStore） | spec 2026-07-23 | `packages/core/src/backend/` | ✅ 稳定（v2-P1） |
 
 ---
 
