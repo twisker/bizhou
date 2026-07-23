@@ -53,7 +53,7 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
 
 资源:
   push <path> [-r] [--chunk 100MB] [--compress] [--no-split] [--name <n>] [--preview] [--to <云端目录>]
-  pull <id|云端目录> [-r] [--out <dir>]
+  pull <id|云端目录> [-r] [--out <dir>]   还原到文件根下（--out 为文件根内子目录，默认按云端结构镜像）
   mkdir <目录>             创建云端目录（mkdir -p 语义）
   ls [目录] [-r]           列出目录（显示真名，需已解锁；-r 递归）
   info <id>                查看资源元数据
