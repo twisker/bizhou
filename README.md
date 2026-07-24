@@ -1,3 +1,5 @@
+<!-- 语言 / Language: **中文** · [English](./README.en.md) -->
+
 # 敝帚（Bìzhǒu）
 
 > 客户端加密引擎 + 命令行工具（`bz`）。在把文件托付给云存储（百度网盘官方 API）之前，先在本地端到端加密，让云端只存密文、无法解析你的内容；取回时自动解密还原、字节级一致。**隐私优先、数据主权。**
@@ -6,118 +8,137 @@
 - **技术栈**：TypeScript + Bun（兼容 Node LTS），加密用运行时内置 `crypto`
 - **存储后端**：用户自己的百度网盘（官方开放平台 API，沙盒目录 `/apps/bizhou/`）
 - **授权**：Apache-2.0
-- **状态**：v0.1.0 · 初始化中（Sprint 0 / M0 技术验证）
+- **状态**：功能完备（加密内核 + 完整 CLI + 云端文件系统层 + 并发/续传/去重 + 备份守护 + shell 补全 + 多类型预览）；`bun test` 全绿，待人工按 git flow 发版
+- **文档站**：<https://twisker.github.io/bizhou/>（中文 / English）
 
 ---
 
 ## 它解决什么
 
-云存储会对上传文件做内容检测/扫描。敝帚让你在上传前**先在本地加密**：云端只拿到一坨无法识别的**密文**，读不到真实内容；取回时自动解密还原。密钥全程只在你的设备上，不上传、不托管。
+云存储会对上传文件做内容检测/扫描，也可能因内容而限制或封禁。敝帚让你在上传前**先在本地加密**：云端只拿到一坨无法识别的**密文**，读不到真实内容；取回时自动解密还原。密钥全程只在你的设备上——不上传、不托管。
 
 ## 安全定性（端到端加密）
 
-- **AES-256-GCM** 加密文件内容（AEAD：机密性 + 防篡改）。
-- **信封加密**：每个资源随机生成 **DEK** 加密内容，再用**主密码派生的 KEK** 包裹 DEK。没有主密码，任何人都解不开。
-- **机器无关**：换机/重装只需重输主密码。忘主密码用初始化时生成的**恢复密钥**兜底。
-- **可审计**：代码中无任何硬编码秘密；算法/KDF 参数公开在 manifest 中。
+- **AES-256-GCM** 加密文件内容（AEAD：机密性 + 防篡改；任何篡改/错误口令都会校验失败而报错，绝不返回损坏数据）。
+- **信封 + 主密钥 MK 间接**：每个资源随机生成 **DEK** 加密内容；一把随机 **主密钥 MK** 用来包裹各资源 DEK；MK 再被「主密码派生的 KEK」和「恢复密钥」各包裹一份。改主密码只需重包 MK，不动任何资源；忘主密码用**恢复密钥**兜底。
+- **内容身份不泄露**：去重用的内容指纹是 `HMAC(派生自 MK 的密钥, 明文)`，只存进**加密的**元数据，云端零可见——攻击者即使握有候选明文也无法确认你存了什么。
+- **机器无关**：换机/重装只需重输主密码。
+- **可审计**：代码中无任何硬编码秘密；算法/KDF/IV 方案公开在 manifest 与 `.claude/tech-spec-registry.md`。
+
+## 主要能力
+
+- **加密上传 / 还原下载**：可选压缩 → AES-256-GCM 加密 → 逻辑分片（默认 100MB）→ bundle → 上传；下载自动合并解密、**字节级一致**。
+- **并发上传**：片内 4MB 传输分片限流池并发，提吞吐（`--concurrency`，默认 4）。
+- **断点续传**：上传/下载中断可续（复用同一 DEK 与分片；下载走临时文件 + 原子落地 + 端到端校验）。
+- **内容去重 + 在飞锁**：同内容已在目标目录则跳过；同内容正在传则提醒结束——防重复上传。
+- **云端文件系统层**：真实目录树（云端与本地都是真实目录）；`mkdir` / `ls -r` / `mv` / `cp -r` / `rename`；删除进**回收站**（`trash` 管理）；`-r` 递归整树加密备份 / 还原。
+- **备份守护 `bz daemon`**：注册备份任务后，前台守护「启动即扫 + 实时监听（变更即备份）+ 定时兜底」；备份语义**永不删云**。
+- **shell 补全**：`bz completion <bash|zsh|powershell>`——命令/子命令/flag 静态补全 + 备份 id/账号名本地动态补全。
+- **多类型预览**：图片/视频缩略、音频片段、**PDF 首页**（落文件）；**文本/代码前 32KB、压缩包文件列表**（`bz preview` 直接打 stdout）。预览独立加密存储、云端零可见。
+- **分享**：`bz share --code`（导出资源 DEK 分享码）/ `--7z`（7z-AES 单包，第三方可解）。
+- **多账号**：`bz account`，每账号独立 token 与 `/apps/bizhou/` 空间。
 
 ## 架构
 
 ```
-┌──────────────────────────┐
-│   核心库 @bizhou/core     │  纯逻辑，无交互，发进度事件
-│  crypto / bundle / chunker│
-│  baidu-api / preview / 7z │
-└────────────┬─────────────┘
-             │
-      ┌──────▼──────┐
-      │  CLI (`bz`)  │  薄包装；可测、可脚本化、可发布为 agent Skill
-      └─────────────┘
+┌──────────────────────────────────────────────┐
+│            核心库 @bizhou/core                 │  纯逻辑，无交互，只发进度事件、绝不 print
+│  crypto · bundle · chunker · content(指纹)     │
+│  journal(锁+续传) · cache · backup · backend    │
+│  baidu-api · resource · vault · account         │
+└───────────────────────┬──────────────────────┘
+                        │
+                 ┌──────▼──────┐
+                 │  CLI (`bz`)  │  薄包装；口令/交互/预览生成/守护/补全均在此
+                 └─────────────┘
 ```
 
-- **核心库 `@bizhou/core`**：加密、bundle/manifest、分片、百度对接、预览、7z 导出。只发进度事件、不打印；无 UI/CLI 依赖，可被任意前端或自动化嵌入。
-- **CLI `bz`**：核心库的命令行包装，可测、可脚本化、可作为 agent Skill 调用。
+- **核心库 `@bizhou/core`**：加密、bundle/manifest、分片、内容指纹、上传日志（锁+续传）、manifest 缓存、备份任务模型、后端抽象（本地 / 百度）、百度对接、预览存储、7z 导出。只发进度事件、不打印、不读时钟、不用 Bun 专有 API——可被任意前端或自动化嵌入，Node LTS 下等价运行。
+- **CLI `bz`**：核心库的命令行包装。口令输入、进度渲染、预览生成（ffmpeg/pdftoppm 等可选外部工具）、`daemon` 守护、shell 补全脚本生成都在 CLI 层。
 
 ## 数据模型
 
-每个"资源"物理上是一个带 `.bz` 后缀的 **Bundle 文件夹**（在别的客户端里显示为普通文件夹）：
+每个「资源」物理上是一个带 `.bz` 后缀的 **Bundle 文件夹**（在别的客户端里显示为普通文件夹）：
 
 ```
-/apps/bizhou/<opaque-id>.bz/
-  ├── manifest.json     # 分片信息 + wrappedKey + 加密元数据 + 预览指向
+/apps/bizhou/<可配置目录树>/<opaque-id>.bz/
+  ├── manifest.json     # 分片信息 + wrappedKey + 加密元数据(含内容指纹) + 预览指向
   ├── 000.part          # 加密分片（默认每片 ≤100MB）
   ├── 001.part
   └── preview.part      # 加密预览包（可选）
 ```
 
-文件夹名不透明、不含原文件名；原文件名只存在（加密的）manifest 里。
+- 文件夹名不透明、不含原文件名；原文件名与内容指纹只存在**加密的** `encMeta` 里。
+- 云端保留**随机 bundle 名**（隐私）；本地/`bz ls` 显示**真名**（从解密的 encMeta 读出）。
+- 本地两个可配置根：**密钥根**（默认 `~/.bizhou`，环境变量 `BIZHOU_HOME`）存密钥/账号/配置；**文件根**（默认系统下载目录，`BIZHOU_FILE_ROOT`）存下载还原的文件。
+
+## 快速开始（离线体验，无需登录/网络）
+
+用本地目录 `--local` 代替百度网盘，跑通「加密 → 存 → 还原字节一致」：
+
+```bash
+pnpm install
+IDX=packages/cli/src/index.ts
+export BIZHOU_HOME=/tmp/bz-demo BIZHOU_MASTER_PASSWORD=demo-pass
+
+bun $IDX init                                              # 设主密码、生成恢复密钥
+bun $IDX push ./任意文件.pdf --local /tmp/bz-store --compress --preview
+bun $IDX ls   --local /tmp/bz-store                         # 显示真名（需已解锁）
+bun $IDX preview <资源ID> --local /tmp/bz-store             # 预览（文本/列表打印，媒体落文件）
+bun $IDX pull <资源ID> --local /tmp/bz-store --out /tmp/bz-out   # 还原，字节级一致
+```
+
+联网使用则先 `bun $IDX login`（OAuth 登录百度），之后 push/pull 省略 `--local` 即走你的百度网盘。完整教程见**文档站**。
 
 ## CLI 一览（`bz`）
 
 | 命令 | 说明 |
 |---|---|
-| `bz init` | 首次设置主密码，生成恢复密钥 |
-| `bz unlock` | 输入主密码解锁本设备会话（缓存至 OS 钥匙串） |
-| `bz login` / `bz logout` | OAuth 登录 / 注销百度账号 |
-| `bz account [list\|use <name>\|add]` | 多账号管理与切换 |
-| `bz push <path> [--no-split] [--chunk 100MB] [--compress]` | 加密 + bundle + 上传 |
-| `bz pull <name\|id> [--out <dir>]` | 下载 + 解密 + 合并还原 |
-| `bz ls [path]` / `bz info <name\|id>` | 列出资源 / 查看元数据 |
-| `bz preview <name\|id>` | 拉取并展示预览包 |
-| `bz share <name\|id> [--code\|--7z]` | 生成分享码 / 导出 7z-AES 单包 |
-| `bz rm <name\|id>` | 删除资源 |
+| `bz init` / `unlock` / `lock` / `passwd` / `recover` | 主密码、恢复密钥、会话解锁/上锁、改密 |
+| `bz login` / `logout` / `account [list\|use <n>\|add <n>]` | 百度 OAuth 登录、注销、多账号 |
+| `bz push <path> [-r] [--to <云端目录>] [--chunk] [--compress] [--no-split] [--name] [--preview] [--force] [--concurrency N]` | 加密上传（`-r` 整树；去重/续传/在飞锁/并发） |
+| `bz pull <id\|云端目录> [-r] [--out <dir>] [--force]` | 下载还原到文件根（幂等/续传/端到端校验/原子落地） |
+| `bz mkdir <目录>` / `ls [目录] [-r]` / `info <id>` | 建目录 / 列目录（真名）/ 看元数据 |
+| `bz mv <src> <目标目录>` / `cp <src> <目标目录> [-r]` / `rename <src> <新名>` | 移动 / 复制 / 改名 |
+| `bz rm <路径\|id> [--yes]` / `trash [list\|restore <id>\|rm <id>\|clear]` | 删除到回收站 / 回收站管理 |
+| `bz share <id> [--code\|--7z]` / `preview <id> [--out <dir>]` | 分享码 / 7z-AES 导出 / 多类型预览 |
+| `bz backup add <目录> [--to]` / `list` / `rm <id>` / `run [<id>]` | 注册/管理/手动执行加密备份任务 |
+| `bz daemon` | 前台守护：启动即扫 + 实时监听 + 定时兜底备份 |
+| `bz completion <bash\|zsh\|powershell>` | 输出 shell 补全脚本 |
 
-## 目录结构（pnpm monorepo）
+通用选项：`--local <dir>`（本地后端，离线/自建）、`--password-stdin`（脚本化读口令）、`-h/--help`、`-v/--version`。完整参考见文档站的**命令参考**。
 
-```
-bizhou/
-├── packages/core/   # @bizhou/core —— 纯逻辑核心库
-├── packages/cli/    # bz —— CLI 薄包装
-├── design/PRD.md    # 产品需求文档
-├── scripts/         # 版本 bump + 发版脚本
-├── .githooks/       # pre-commit（自动 patch 版本）
-└── .claude/         # AI-Human 协作框架与登记表
-```
+## 安装
+
+当前从源码运行（见「快速开始」）。发布渠道（npm `@bizhou/cli`、Homebrew tap、Scoop bucket）打包脚本已就绪，正式发布待人工触发。
 
 ## 前置准备
 
 1. 安装 [Bun](https://bun.sh)（主运行时；核心库亦兼容 Node LTS）与 pnpm。
-2. 自备**百度网盘开放平台应用凭证**（AppKey/SecretKey）——工具不内嵌任何凭证。`cp .env.example .env` 后填入。
+2. 自备**百度网盘开放平台应用凭证**（AppKey/SecretKey）——工具不内嵌任何凭证。`cp .env.example .env` 后填入 `BAIDU_APP_KEY` / `BAIDU_SECRET_KEY`。
+3. （可选）预览外部工具：`ffmpeg`（音视频/图片缩略）、`pdftoppm`（poppler，PDF 首页）。缺失时相应预览优雅跳过，不影响上传。
 
 ## 开发与测试
 
 ```bash
 pnpm install            # 安装 workspace 依赖
 pnpm run typecheck      # 两包 TypeScript 类型检查
-bun test               # 运行全部测试（当前 73 项全绿）
+bun test                # 运行全部测试（当前 200+ 项全绿）
+pnpm run build          # 构建 core（ESM+d.ts）与自包含 CLI
 ```
 
-离线体验（用本地目录代替百度网盘，无需登录/网络）：
+## 文档
 
-```bash
-IDX=packages/cli/src/index.ts
-export BIZHOU_CONFIG_DIR=/tmp/bz-demo BIZHOU_MASTER_PASSWORD=demo-pass
-bun $IDX init
-bun $IDX push ./任意文件.pdf --local /tmp/bz-store --compress
-bun $IDX ls   --local /tmp/bz-store
-bun $IDX pull <资源ID> --local /tmp/bz-store --out /tmp/bz-out   # 还原字节级一致
-```
-
-联网使用则先 `bun $IDX login`（OAuth），之后 push/pull 省略 `--local` 即走百度网盘。
-
-## 状态
-
-- ✅ **M0 已通过（真实百度网盘）**：500MB 加密文件上传→下载→**字节级一致**，云端未限制/封禁加密大文件（全案前提成立）。实测上行 ≈5.5MB/s、下行 ≈1.1MB/s。
-- ✅ **M1 功能完成**：加密内核（AES-256-GCM 信封 + scrypt + MK/恢复密钥）、bundle/manifest、分片器、完整加密往返（含 >4GB 本地实证 4.29GiB→44 片）、百度对接、多账号、CLI 全命令、ffmpeg 预览、7z-AES 导出、构建/lint/打包、三平台 CI。
-- ⏳ **待人工**：发布（生成的 Homebrew/Scoop manifest 已就绪，需渠道账号 + GitHub Release）。
+- **文档站（GitHub Pages，中文 / English）**：<https://twisker.github.io/bizhou/> —— 安装、快速开始、核心概念、命令参考、备份守护/分享/补全教程、安全模型、FAQ。
+- 内部协作与规格：`.claude/`、`design/PRD.md`（面向贡献者/AI 协作）。
 
 ## 路线图
 
-- **M0（Sprint 0）** — 技术验证：跑通 OAuth + 上传/下载往返字节一致，验证云端不限制加密大文件。
-- **M1（Phase 1）** — 核心库 + CLI 全 pipeline；预览、7z-AES 导出、多账号；>4GB 大文件与断点续传。
-- **Phase 2** — 生态与打磨（**仅 CLI 相关**）：shell 补全、更多预览、daemon/定时备份、进 homebrew-core/winget、worker_threads 并行加密。
-
-详见 `.claude/sprint-plan.md`。
+- ✅ **M0** — 技术验证：真实百度网盘 500MB 加密文件往返字节一致、云端不限制加密大文件。
+- ✅ **M1** — 核心库 + CLI 全 pipeline；预览、7z-AES 导出、多账号；>4GB 大文件。
+- ✅ **v2** — 云端文件系统层：真实目录树、双可配本地根、`mv/cp/rename`、回收站、`-r` 递归整树。
+- ✅ **Phase 3（打磨与生态，仅 CLI）** — 健壮上传（并发/续传/去重/在飞锁）、健壮下载（幂等/分片续传/端到端校验）、daemon/定时备份、shell 补全、更多预览类型。
+- ⏳ **待办** — 正式发布（npm/Homebrew/Scoop）；进 homebrew-core / winget（待用户量）。
 
 ## 授权
 

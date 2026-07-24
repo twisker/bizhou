@@ -66,7 +66,8 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
   cp <src> <目标目录> [-r]  复制 bundle 或目录（目录需 -r）到目标目录下
   rename <src> <新名>       改名：bundle 改真名（重写 encMeta）/ 目录 native 改名
   share <id> [--code|--7z] 生成分享码 / 导出 7z-AES（--7z 需 7z 二进制）
-  preview <id> [--out <dir>]  下载并解密预览包（图片/视频缩略、音频片段）
+  preview <id> [--out <dir>]  下载并解密预览包：图片/视频缩略图、音频片段、PDF 首页（落文件）；
+                              文本/代码前 32KB、压缩包(zip/tar/tgz)文件列表（直接打印到 stdout）
 
 备份/守护:
   backup add <本地目录> [--to <云端目录>]   注册加密备份任务
