@@ -8,7 +8,7 @@
 
 ---
 
-## 当前 Sprint：Phase 3 · S1+S2+D1+C1 ✅ 完成（2026-07-24，待人工 git flow 合并）
+## 当前 Sprint：Phase 3 · S1+S2+D1+C1+P1 ✅ 完成（2026-07-24，待人工 git flow 合并）
 
 **最后更新：** 2026-07-24（S1+S2+D1 全部完成，opus 三轮整分支评审均 Ready to merge）
 
