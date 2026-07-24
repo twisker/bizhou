@@ -36,12 +36,15 @@ describe("shell 生成器", () => {
     expect(s).toContain("_files");
   });
 
-  test("genPowerShell：含 Register-ArgumentCompleter、全部命令、动态槽", () => {
+  test("genPowerShell：含 Register-ArgumentCompleter、全部命令、动态槽、flag/文件/前缀补全", () => {
     const s = genPowerShell();
     expect(s).toContain("Register-ArgumentCompleter");
     expect(s).toContain("-CommandName bz");
     for (const c of topLevelCommandNames()) expect(s).toContain(c);
     expect(s).toContain("bz __complete");
+    expect(s).toContain("--compress"); // push 的 flag 已编入 $BzSpec
+    expect(s).toContain("CompleteFilename"); // file/dir 位置参数走原生文件补全
+    expect(s).toContain("-like"); // 前缀过滤（子命令/flag 均按 wordToComplete 前缀匹配）
   });
 });
 

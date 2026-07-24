@@ -265,50 +265,96 @@ compdef _bz bz
 `;
 }
 
+/** 某个位置参数的补全"种类"标记：仅 file/dir/dynamic 需要脚本块特殊分支；subcommand/cloud/none 不需要（无候选或走 subs）。 */
+function psArgKindOf(arg?: ArgKind): "file" | "dir" | "dynamic" | undefined {
+  if (!arg) return undefined;
+  if (arg.kind === "file") return "file";
+  if (arg.kind === "dir") return "dir";
+  if (arg.kind === "dynamic") return "dynamic";
+  return undefined; // subcommand 走 subs 分支；cloud/none 本轮不补
+}
+
 export function genPowerShell(): string {
   const cmds = COMMANDS.map((c) => `'${c.name}'`).join(", ");
-  // 每命令：子命令 + 动态 ctx（供脚本块按已输入 token 分派）
+  // TODO(C1 follow-up): value-flag valueArg completion (--out → dir) not yet wired
+  // 每命令：flags（命令自身 + GLOBAL_FLAGS，已去重）+ 子命令 + 顶层/子命令二级位置参数种类（file/dir/dynamic），
+  // 供脚本块按"当前正在补全到第几个位置"数据驱动地分派——不写死 shell 逻辑，全部来自 COMMANDS 表。
   const table = COMMANDS.map((c) => {
+    const flagsArr = flagsFor(c.name)
+      .split(" ")
+      .filter(Boolean)
+      .map((f) => `'${f}'`)
+      .join(", ");
+    const parts: string[] = [`flags = @(${flagsArr})`];
     const subs = subNamesFor(c.name);
-    const dyn = dynamicCtxFor(c.name);
-    const parts: string[] = [];
-    if (subs)
+    if (subs) {
       parts.push(
         `subs = @(${subs
           .split(" ")
           .map((s) => `'${s}'`)
           .join(", ")})`,
       );
-    if (dyn?.kind === "dynamic") parts.push(`ctx = '${dyn.ctx}'`);
-    // 子命令的动态槽
-    const c2 = COMMANDS.find((x) => x.name === c.name);
-    const subCtx = c2?.subArgs
-      ? Object.entries(c2.subArgs)
-          .map(([k, v]) => (v[0]?.kind === "dynamic" ? `'${k}'='${v[0].ctx}'` : ""))
-          .filter(Boolean)
-          .join("; ")
-      : "";
-    if (subCtx) parts.push(`subCtx = @{${subCtx}}`);
+      const subKindEntries: string[] = [];
+      const subCtxEntries: string[] = [];
+      for (const sub of subNameList(c.name)) {
+        const arg = c.subArgs?.[sub]?.[0];
+        const k = psArgKindOf(arg);
+        if (k) subKindEntries.push(`'${sub}'='${k}'`);
+        if (k === "dynamic" && arg?.kind === "dynamic") subCtxEntries.push(`'${sub}'='${arg.ctx}'`);
+      }
+      if (subKindEntries.length) parts.push(`subKind = @{${subKindEntries.join("; ")}}`);
+      if (subCtxEntries.length) parts.push(`subCtx = @{${subCtxEntries.join("; ")}}`);
+    } else {
+      const arg = c.args[0];
+      const k = psArgKindOf(arg);
+      if (k) parts.push(`argKind = '${k}'`);
+      if (k === "dynamic" && arg?.kind === "dynamic") parts.push(`ctx = '${arg.ctx}'`);
+    }
     return `    '${c.name}' = @{ ${parts.join("; ")} }`;
   }).join("\n");
 
   return `# PowerShell completion for bz —— 安装：bz completion powershell | Out-String | Invoke-Expression（写入 $PROFILE）
+# 注：Register-ArgumentCompleter -Native 会抑制 PowerShell 默认的路径补全，
+# 因此 file/dir 位置参数须由脚本块自己调用 CompleteFilename 生成候选。
 $script:BzSpec = @{
 ${table}
 }
 Register-ArgumentCompleter -Native -CommandName bz -ScriptBlock {
   param($wordToComplete, $commandAst, $cursorPosition)
   $tokens = $commandAst.CommandElements | ForEach-Object { $_.ToString() }
-  if ($tokens.Count -le 1) {
-    return @(${cmds}) | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
+  # 去掉命令名 'bz'；若末尾 token 就是正在补全的当前词，先剔除——
+  # 这样 $rest.Count 才能稳定表示"已经完整输入的参数个数"，
+  # 无论用户是刚敲完一个空格（wordToComplete 为空）还是正在打半个词（如 'u'）。
+  $rest = @($tokens | Select-Object -Skip 1)
+  if ($rest.Count -gt 0 -and $rest[$rest.Count - 1] -eq $wordToComplete) {
+    $rest = @($rest | Select-Object -First ($rest.Count - 1))
   }
-  $cmd = $tokens[1]
-  $spec = $script:BzSpec[$cmd]
   $cands = @()
-  if ($spec) {
-    if ($spec.subs -and $tokens.Count -le 2) { $cands += $spec.subs }
-    elseif ($spec.subCtx -and $spec.subCtx[$tokens[2]]) { $cands += (bz __complete $spec.subCtx[$tokens[2]]) }
-    elseif ($spec.ctx) { $cands += (bz __complete $spec.ctx) }
+  if ($rest.Count -eq 0) {
+    $cands = @(${cmds})
+  } else {
+    $cmd = $rest[0]
+    $spec = $script:BzSpec[$cmd]
+    if ($spec) {
+      # flag 补全：任意位置，只要当前词以 - 开头
+      if ($wordToComplete -like '-*') {
+        $cands = $spec.flags
+      } elseif ($rest.Count -eq 1 -and $spec.subs) {
+        $cands = $spec.subs
+      } elseif ($rest.Count -eq 1 -and $spec.argKind -eq 'dynamic') {
+        $cands = @(bz __complete $spec.ctx)
+      } elseif ($rest.Count -eq 1 -and ($spec.argKind -eq 'file' -or $spec.argKind -eq 'dir')) {
+        return [System.Management.Automation.CompletionCompleters]::CompleteFilename($wordToComplete)
+      } elseif ($spec.subs -and $rest.Count -ge 2) {
+        $sub = $rest[1]
+        $subKind = $spec.subKind[$sub]
+        if ($subKind -eq 'dynamic') {
+          $cands = @(bz __complete $spec.subCtx[$sub])
+        } elseif ($subKind -eq 'file' -or $subKind -eq 'dir') {
+          return [System.Management.Automation.CompletionCompleters]::CompleteFilename($wordToComplete)
+        }
+      }
+    }
   }
   $cands | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
 }

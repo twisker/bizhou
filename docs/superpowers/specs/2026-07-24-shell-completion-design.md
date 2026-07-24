@@ -107,3 +107,12 @@ const COMMANDS: CommandSpec[];   // 覆盖 index.ts 的每一个 case
 - 补全脚本与 `__complete` 输出**不含任何密钥/凭证**（只有命令名、flag、任务 id、账号名、shell 名）。
 - 零新增外部运行时依赖（生成器为纯字符串拼接）。
 - 纯 CLI 层，核心库不改。
+
+## 追记：C1 最终评审 Important 修复（genPowerShell 补齐 flag/文件/前缀补全）
+
+- 最终评审发现 `genPowerShell` 落后于 bash/zsh：只补顶层命令名与（末尾带空格的）子命令，**不补 flag、不补文件/目录、部分子命令走前缀输入会失效**（如 `bz account u<TAB>` 补不出 `use`）。
+- 修复后 `$script:BzSpec` 按命令内嵌 `flags`（命令自身 + `GLOBAL_FLAGS`，复用既有 `flagsFor` 去重）、顶层 `argKind`（`file`/`dir`/`dynamic`）及子命令级 `subKind`/`subCtx`，与 `genBash`/`genZsh` 同源于 `COMMANDS` 表，不写死分支。
+- `Register-ArgumentCompleter -Native` 会抑制 PowerShell 默认路径补全，因此 file/dir 槽由脚本块显式调用 `[System.Management.Automation.CompletionCompleters]::CompleteFilename($wordToComplete)` 产出候选（`push` 文件槽、`backup add` 目录槽已覆盖；`mkdir`/`ls` 等云端槽仍按设计本轮不补）。
+- 子命令/flag 均改为按 `$wordToComplete` 用 `-like "$wordToComplete*"` 前缀过滤，位置判定基于"已确定输入的 token 数"（剔除正在补全中的当前词后计数），而非旧版 `tokens.Count -le 2` 的严格相等判断，解决部分输入子命令名时补全失效的问题。
+- value-flag 的值补全（如 `--out` → dir）与 bash/zsh 一致标注 `TODO(C1 follow-up)`，留作后续任务。
+- **未执行验证**：本机无 `pwsh` 二进制，无法像 bash/zsh 那样跑执行级回归测试（source 脚本 + 模拟补全 widget 调用）。`completion-gen.test.ts` 仅能做字符串/结构断言（含 flag 名、`CompleteFilename`、`-like` 等）。**真实 pwsh 会话内的 tab 行为需要人工验证**，已在 `人工TODO事项.md` 登记。
