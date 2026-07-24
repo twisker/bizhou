@@ -68,4 +68,16 @@ describe("bz __complete 本地动态", () => {
     const out = await capture(() => cmdComplete(rt, "shell", "z"));
     expect(out).toEqual(["zsh"]);
   });
+
+  test("底层抛错（listAccounts reject）→ 命中 catch，静默无输出、不抛", async () => {
+    const rt = {
+      accounts: {
+        listAccounts: async () => {
+          throw new Error("boom");
+        },
+      },
+    } as never;
+    const out = await capture(() => cmdComplete(rt, "account"));
+    expect(out).toEqual([]); // catch 兜住 → 空输出、不抛（补全不刷屏）
+  });
 });
