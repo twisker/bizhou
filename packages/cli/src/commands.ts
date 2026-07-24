@@ -429,12 +429,19 @@ export async function pushOneFile(
 
   let preview: { kind: PreviewKind; data: Buffer } | undefined;
   if (opts.preview) {
-    const p = await generatePreview(absFile);
+    // 预览生成绝不阻断上传：generatePreview 正常返回 null 表示不生成；
+    // 万一它抛（如 TMPDIR 不可写），也在此兜住当作"无预览"继续。
+    let p: { kind: PreviewKind; data: Buffer } | null = null;
+    try {
+      p = await generatePreview(absFile);
+    } catch {
+      p = null;
+    }
     if (p) {
       preview = p;
       info(`已生成预览包（${p.kind}，${formatBytes(p.data.length)}）`);
     } else {
-      warn("未生成预览（非媒体类型或 ffmpeg 不可用），继续上传原文件。");
+      warn("未生成预览（非目标类型或所需外部工具不可用），继续上传原文件。");
     }
   }
 

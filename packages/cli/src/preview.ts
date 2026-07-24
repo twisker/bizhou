@@ -145,8 +145,9 @@ async function genFfmpeg(
   src: string,
   kind: "image" | "video" | "audio",
 ): Promise<{ kind: PreviewKind; data: Buffer } | null> {
-  const work = await mkdtemp(join(tmpdir(), "bizhou-prev-"));
+  let work: string | undefined;
   try {
+    work = await mkdtemp(join(tmpdir(), "bizhou-prev-")); // 挪进 try：TMPDIR 不可写也降级 null 不抛
     if (kind === "image" || kind === "video") {
       const out = join(work, "thumb.jpg");
       const vf = "scale=320:-1";
@@ -164,7 +165,7 @@ async function genFfmpeg(
   } catch {
     return null; // ffmpeg 缺失或失败：静默跳过预览（不阻断上传）
   } finally {
-    await rm(work, { recursive: true, force: true });
+    if (work) await rm(work, { recursive: true, force: true });
   }
 }
 
@@ -312,8 +313,9 @@ function runPdftoppm(args: string[]): Promise<void> {
 /** PDF 首页缩略图：依赖可选外部二进制 pdftoppm。返回 null 表示 pdftoppm 缺失或生成失败（不阻断上传）。 */
 export async function genPdf(path: string): Promise<{ kind: "image"; data: Buffer } | null> {
   const src = resolve(path);
-  const work = await mkdtemp(join(tmpdir(), "bizhou-pdf-"));
+  let work: string | undefined;
   try {
+    work = await mkdtemp(join(tmpdir(), "bizhou-pdf-")); // 挪进 try：TMPDIR 不可写也降级 null 不抛
     const prefix = join(work, "pg");
     // 首页 → jpeg，缩放到宽 320。用 -jpeg（非 -png）：kind=image 落地为 .jpg（与 ffmpeg 图片预览、
     // cmdPreview 的 .jpg 扩展名一致），避免"PNG 字节存成 .jpg"的格式/扩展名不符。
@@ -325,7 +327,7 @@ export async function genPdf(path: string): Promise<{ kind: "image"; data: Buffe
   } catch {
     return null; // pdftoppm 缺失或失败：静默降级
   } finally {
-    await rm(work, { recursive: true, force: true });
+    if (work) await rm(work, { recursive: true, force: true });
   }
 }
 
