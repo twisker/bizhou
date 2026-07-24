@@ -6,7 +6,7 @@ set -euo pipefail
 
 REPO="$(git rev-parse --show-toplevel)"
 VERSION="$(cat "$REPO/VERSION")"
-REPO_SLUG="${BIZHOU_REPO_SLUG:-xkool/bizhou}"
+REPO_SLUG="${BIZHOU_REPO_SLUG:-twisker/bizhou}"
 OUT="$REPO/packaging/generated"
 TARBALL="bizhou-cli-$VERSION.tgz"
 URL="https://github.com/$REPO_SLUG/releases/download/v$VERSION/$TARBALL"
