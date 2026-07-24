@@ -221,7 +221,7 @@
 ### Phase 3 · C1 — shell 补全 📋 **计划就绪，待开跑**
 
 > 设计：`docs/superpowers/specs/2026-07-24-shell-completion-design.md`
-> 计划：`docs/superpowers/plans/2026-07-24-shell-completion-c1.md`（待写）
+> 计划：`docs/superpowers/plans/2026-07-24-shell-completion-c1.md`（含各任务完整 TDD 步骤）
 > 范围：bash / zsh / PowerShell（不含 fish）；静态 + 本地动态（backup-id/account/shell），云端动态缓做。执行方式：子代理驱动。
 
 | 任务 | 说明 | 责任人 | 状态 |
