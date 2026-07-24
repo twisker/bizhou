@@ -238,7 +238,7 @@
 ### Phase 3 · P1 — 更多预览类型 📋 **计划就绪，待开跑**
 
 > 设计：`docs/superpowers/specs/2026-07-24-more-preview-types-design.md`
-> 计划：`docs/superpowers/plans/2026-07-24-more-preview-types-p1.md`（待写）
+> 计划：`docs/superpowers/plans/2026-07-24-more-preview-types-p1.md`（含各任务完整 TDD 步骤）
 > 范围：文本/代码 + PDF 首页 + 压缩包列表（不含 Office）。执行方式：子代理驱动。
 
 | 任务 | 说明 | 责任人 | 状态 |
