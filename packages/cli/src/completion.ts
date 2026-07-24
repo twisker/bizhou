@@ -97,7 +97,8 @@ export const COMMANDS: CommandSpec[] = [
   { name: "rename", flags: [], args: [CLOUD_ID, { kind: "none" }] },
   {
     name: "share",
-    flags: [F("--code"), F("--7z"), F("--out", true, DIR), F("--ttl", true)],
+    // 注：cmdShare 当前只读 --code/--7z/--out（不含 --ttl）；补全须贴合实际，避免提示无效 flag。
+    flags: [F("--code"), F("--7z"), F("--out", true, DIR)],
     args: [CLOUD_ID],
   },
   { name: "preview", flags: [F("--out", true, DIR)], args: [CLOUD_ID] },
