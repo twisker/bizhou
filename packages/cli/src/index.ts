@@ -33,6 +33,7 @@ import {
   cmdUnlock,
   createRuntime,
 } from "./commands.ts";
+import { cmdComplete } from "./completion.ts";
 import { cmdBackup, cmdDaemon } from "./daemon.ts";
 import { errorLine, exitCodeFor, info, out } from "./render.ts";
 
@@ -260,6 +261,9 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     case "daemon":
       await cmdDaemon(rt, common);
+      return 0;
+    case "__complete":
+      await cmdComplete(rt, positionals[1] ?? "", positionals[2]);
       return 0;
     default:
       errorLine(`未知命令：${cmd}`);

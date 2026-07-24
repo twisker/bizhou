@@ -3,6 +3,9 @@
  * 纯 CLI 层，核心库不改。__complete 只读本地、绝不联网/解锁。
  */
 
+import { readBackups } from "@bizhou/core";
+import type { Runtime } from "./runtime.ts";
+
 export type ArgKind =
   | { kind: "file" } // shell 原生文件补全
   | { kind: "dir" } // shell 原生目录补全
@@ -119,4 +122,33 @@ export const COMMANDS: CommandSpec[] = [
 
 export function topLevelCommandNames(): string[] {
   return COMMANDS.map((c) => c.name);
+}
+
+/**
+ * 隐藏命令 bz __complete <ctx> [prefix]：逐行打印本地动态候选。
+ * 只读本地状态；绝不 resolveMk/网络/makeBackend。任何异常静默吞掉（补全不该报错刷屏）。
+ */
+export async function cmdComplete(rt: Runtime, ctx: string, prefix?: string): Promise<void> {
+  let candidates: string[] = [];
+  try {
+    switch (ctx) {
+      case "shell":
+        candidates = ["bash", "zsh", "powershell"];
+        break;
+      case "backup-id":
+        candidates = (await readBackups(rt.paths.dir)).map((j) => j.id);
+        break;
+      case "account":
+        candidates = (await rt.accounts.listAccounts()).names;
+        break;
+      default:
+        candidates = []; // 未知/预留（cloud-*）→ 空
+    }
+  } catch {
+    candidates = []; // 静默：补全场景不抛
+  }
+  const p = prefix ?? "";
+  for (const c of candidates) {
+    if (c.startsWith(p)) process.stdout.write(`${c}\n`);
+  }
 }
