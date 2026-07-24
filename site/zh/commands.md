@@ -1,0 +1,173 @@
+---
+title: 命令参考
+parent: 中文文档
+nav_order: 4
+---
+
+# 命令参考
+
+下面用 `bz` 代表 CLI（从源码运行时替换为 `bun packages/cli/src/index.ts`）。
+
+**通用选项**（多数命令可用）：
+
+| 选项 | 说明 |
+|---|---|
+| `--local <dir>` | 用本地目录代替百度网盘（离线/自建后端） |
+| `--password-stdin` | 从 stdin 读主密码（脚本化） |
+| `-h`, `--help` | 显示帮助 |
+| `-v`, `--version` | 显示版本 |
+
+---
+
+## 密钥与会话
+
+### `bz init`
+首次设置主密码，生成**恢复密钥**（务必抄下保存）。会创建密钥根下的 vault。
+
+### `bz unlock [--ttl <秒>]`
+输入主密码解锁本设备会话（把主密钥缓存一段时间，之后命令免再输）。`--ttl` 设缓存时长。
+
+### `bz lock`
+立即上锁，清除缓存的主密钥。
+
+### `bz passwd`
+修改主密码（恢复密钥不变；只重新包裹 MK，不动任何资源）。
+
+### `bz recover`
+用恢复密钥重设主密码（忘记主密码时的兜底）。
+
+---
+
+## 账号（百度 OAuth）
+
+### `bz login [--name <n>] [--device] [--port <p>]`
+OAuth 登录百度。默认浏览器授权 + 本地回调；`--device` 走设备码流；`--port` 指定回调端口；`--name` 给账号命名。
+
+### `bz logout`
+注销当前账号。
+
+### `bz account [list | use <名字> | add <名字>]`
+多账号管理：列出 / 切换 / 新增。每账号独立 token 与 `/apps/bizhou/` 空间。
+
+---
+
+## 上传 / 下载
+
+### `bz push <path> [选项]`
+加密上传。**去重 / 续传 / 在飞锁 / 并发**自动生效。
+
+| 选项 | 说明 |
+|---|---|
+| `-r`, `--recursive` | 整个目录树逐文件加密上传（镜像目录结构） |
+| `--to <云端目录>` | 显式指定云端落点（默认按相对文件根镜像） |
+| `--chunk <大小>` | 逻辑分片大小（如 `100MB`，默认 100MB） |
+| `--compress` | 上传前 gzip 压缩 |
+| `--no-split` | 不分片（整文件一片） |
+| `--name <n>` | 覆盖显示用的真名 |
+| `--preview` | 生成并加密预览（媒体/PDF/文本/压缩包列表，见 `preview`） |
+| `--force` | 无视去重与在飞锁，强制上传 |
+| `--concurrency <N>` | 片内 4MB 分片并发数（默认 4，范围 1–16） |
+
+```bash
+bz push ./报告.pdf --to /工作 --compress --preview
+bz push ./项目目录 -r --concurrency 8
+```
+
+### `bz pull <id | 云端目录> [选项]`
+下载还原到**文件根**下（镜像云端结构）。**幂等 / 续传 / 端到端校验 / 原子落地**自动生效。
+
+| 选项 | 说明 |
+|---|---|
+| `-r`, `--recursive` | 递归还原整个云端目录子树 |
+| `--out <dir>` | 落点子目录（文件根内），默认按云端结构镜像 |
+| `--force` | 无视幂等与在飞锁，强制下载 |
+
+```bash
+bz pull 3af8...c9   --out 归档
+bz pull /工作/2026 -r
+```
+
+---
+
+## 目录与资源管理
+
+### `bz mkdir <目录>`
+创建云端目录（`mkdir -p` 语义）。
+
+### `bz ls [目录] [-r]`
+列出目录内容（显示**真名**，需已解锁）。`-r` 递归。
+
+### `bz info <id>`
+查看资源元数据（真名、大小、分片、内容指纹、预览等）。
+
+### `bz mv <src> <目标目录>`
+把 bundle 或目录移动到目标目录下。
+
+### `bz cp <src> <目标目录> [-r]`
+复制 bundle 或目录（目录需 `-r`）到目标目录下。
+
+### `bz rename <src> <新名>`
+改名：bundle 改**真名**（重写加密的 encMeta，分片与密钥不动）；目录 native 改名。
+
+### `bz rm <路径 | id> [--yes]`
+删除到**回收站**。删除目录需 `--yes` 二次确认。
+
+### `bz trash [list | restore <id> | rm <id> | clear]`
+回收站管理：列出 / 恢复 / 永久删除单条 / 清空。
+
+> 百度后端的回收站管理接口若不可用，`trash` 会提示到百度网盘 App/网页操作；删除进原生回收站本身可用。
+
+---
+
+## 分享 / 预览
+
+### `bz share <id> [--code | --7z] [--out <dir>]`
+- `--code`：导出该资源的 **DEK 分享码**（可失效），持码者可解该资源。
+- `--7z`：导出 **7z-AES 单包**（含头部加密），第三方用 7-Zip / Keka / p7zip + 密码即可解。
+
+### `bz preview <id> [--out <dir>]`
+下载并解密预览包：
+
+| 源类型 | 预览 | 展示方式 |
+|---|---|---|
+| 图片 / 视频 | 320px 缩略图 | 落 `.jpg` 文件 |
+| 音频 | 前 15s 片段 | 落 `.mp3` 文件 |
+| PDF | 首页缩略图 | 落 `.jpg` 文件（需 pdftoppm） |
+| 文本 / 代码 | 前 32KB | **打印到 stdout** |
+| 压缩包（zip/tar/tgz） | 文件列表（≤500 条） | **打印到 stdout** |
+
+预览在 `push --preview` 时生成、独立加密存储、云端零可见。
+
+---
+
+## 备份 / 守护
+
+### `bz backup add <本地目录> [--to <云端目录>]`
+注册一个加密备份任务（存密钥根下）。
+
+### `bz backup list`
+列出备份任务（id / 本地目录 / 云端目录 / 上次备份时间）。
+
+### `bz backup rm <id>`
+删除备份任务（**不动**云端已备份数据）。
+
+### `bz backup run [<id>]`
+手动执行一次备份（省略 id 跑全部任务）。幂等：未变文件自动跳过。
+
+### `bz daemon`
+前台守护：**启动即扫 + 实时监听（变更即备份）+ 定时兜底**，三触发共用同一幂等备份引擎。`Ctrl-C`（或 SIGTERM）**优雅退出**（等在飞备份完成再退）。备份语义**永不删云**（本地删不镜像到云端）。
+
+详见 [备份与守护](./guide-backup.html)。
+
+---
+
+## 其它
+
+### `bz completion <bash | zsh | powershell>`
+输出对应 shell 的补全脚本。`eval` 之或写入 rc 文件即生效。详见 [分享与 shell 补全](./guide-share-completion.html)。
+
+```bash
+eval "$(bz completion bash)"                 # 当前会话
+bz completion zsh > "${fpath[1]}/_bz"        # zsh 持久化
+bz completion powershell | Out-String | Invoke-Expression   # PowerShell 当前会话
+```

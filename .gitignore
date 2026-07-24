@@ -1,0 +1,44 @@
+# --- IDE / 编辑器 ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# --- Node / Bun / pnpm ---
+node_modules/
+dist/
+build/
+out/
+*.tsbuildinfo
+.pnpm-store/
+bun.lockb.bak
+
+# --- Python（如有辅助脚本） ---
+__pycache__/
+*.pyc
+
+# --- 环境与密钥（安全红线：绝不入库） ---
+.env
+.env.*
+!.env.example
+*.local
+# 百度凭证 / OAuth token / 主密码 / 恢复密钥 —— 任何本地机密文件
+*.key
+*.pem
+secrets/
+.bizhou/
+credentials.json
+
+# --- 测试与覆盖率 ---
+coverage/
+*.log
+
+# --- 测试产物 / 临时大文件 ---
+tmp/
+*.bz/
+
+# 发版生成物（tarball + manifest）
+packaging/generated/
+
+# subagent-driven 进度台账（临时）
+.superpowers/
