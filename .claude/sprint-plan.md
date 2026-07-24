@@ -218,7 +218,7 @@
 **评审拦下并修复的 Important（各任务）：** ①`readBackups` 读失败吞错→会截断任务注册（改：ENOENT/损坏→[]，其它 IO 错误→抛）+ 唯一 tmp 防并发写 clobber（T1）②`watchRecursive.stop()` 与异步注册竞态→泄漏 FSWatcher/卡退出（改：`stopped` 守卫）（T4）③`SerialJobRunner` run() 抛错→丢合并补跑 & `drain()` reject 致退出挂死（改：loop 吞逃逸异常）+ daemon `try/finally` 抹 MK + `once` 信号 + drain `.catch`（T5）。
 **已知限制（defer）：** `bz backup add` 与运行中 daemon 的 `updateLastBackup` 对 `backups.json` 有 last-writer-wins 竞态，极端下新加任务可能被覆盖——单用户工具、`backup list` 可见、重跑 add 即修复；不损云端数据。id 为 32-bit 随机（个人规模碰撞可忽略）；空源目录不建空云端镜像目录。
 
-### Phase 3 · C1 — shell 补全 📋 **计划就绪，待开跑**
+### Phase 3 · C1 — shell 补全 ✅ **完成（2026-07-24）**
 
 > 设计：`docs/superpowers/specs/2026-07-24-shell-completion-design.md`
 > 计划：`docs/superpowers/plans/2026-07-24-shell-completion-c1.md`（含各任务完整 TDD 步骤）
@@ -226,12 +226,14 @@
 
 | 任务 | 说明 | 责任人 | 状态 |
 |-----|------|--------|------|
-| C1-T1 | 命令规格表（类型 + GLOBAL_FLAGS + COMMANDS，单一真值来源）+ 与 index.ts 命令集一致性测试 | AI | ⬜ 待开始 |
-| C1-T2 | `bz __complete`（本地动态 backup-id/account/shell，**零联网零解锁**，出错静默空）+ 隐藏分发 | AI | ⬜ 待开始 |
-| C1-T3 | 三 shell 生成器（genBash/genZsh/genPowerShell 纯函数，规格表→脚本）+ 生成器测试 | AI | ⬜ 待开始 |
-| C1-T4 | `bz completion <shell>` 命令 + `index.ts` 分发 + HELP | AI | ⬜ 待开始 |
+| C1-T1 | 命令规格表（类型 + GLOBAL_FLAGS + COMMANDS，单一真值来源）+ 与 index.ts 命令集一致性测试 | AI | ✅ 已完成 |
+| C1-T2 | `bz __complete`（本地动态 backup-id/account/shell，**零联网零解锁**，出错静默空）+ 隐藏分发 | AI | ✅ 已完成 |
+| C1-T3 | 三 shell 生成器（genBash/genZsh/genPowerShell 纯函数，规格表→脚本）+ 生成器测试 | AI | ✅ 已完成 |
+| C1-T4 | `bz completion <shell>` 命令 + `index.ts` 分发 + HELP | AI | ✅ 已完成 |
 
-**验收目标：** 三 shell 脚本含全部命令/flag、动态槽正确挂 `bz __complete`、文件槽走原生补全；`__complete` 只读本地、不抛不阻塞；`bun test` 无回归。**红线：** `__complete` 绝不解锁/联网/弹密码、输出无密钥。**测试边界：** 真实 shell tab 行为 = 手动验证（登记人工）。
+**验收（达成）：** `bun test` **204 全绿 + 1 skip**；typecheck/lint/build 全过。opus 整分支最终评审 **✅ Ready to merge**（安全红线全过：`__complete` 只读本地、绝不 resolveMk/网络/弹密码、出错静默、脚本与输出零密钥）。
+**评审拦下并修复的关键缺陷：** ①`genZsh` 两个 **Critical**——自屏蔽 `words` + 子命令误用 bash 0-索引（`words[2]`）而非 zsh 1-索引（`words[3]`/`CURRENT==3`），真 shell 里只剩顶层补全（评审**执行**生成脚本才发现，子串测试放过）；已修 + 加**执行级**回归测试（source 脚本 + 模拟 widget，zsh/bash 各 2 例）（T3）。②`genPowerShell` **Important**——不补 flag/文件、部分子命令输入失效；已补齐（flag 内嵌 + `CompleteFilename` 文件补全 + `-like` 前缀健壮），逻辑完成但**本机无 pwsh 未执行**→人工 H-10 验证。
+**已知限制（defer）：** `FlagSpec.valueArg`（`--out`→dir 值补全）三生成器均未消费，留 `TODO(C1 follow-up)`；bash 文件槽依赖 `bash-completion`；一致性测试守 COMMANDS-vs-KNOWN（两侧手维护）。**测试边界：** 真实 shell tab 行为（尤其 pwsh）= 人工验证（H-10）。
 
 ### Phase 3 · 其余候选（待细化）
 
