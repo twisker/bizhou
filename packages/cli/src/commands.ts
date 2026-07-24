@@ -1074,6 +1074,10 @@ export async function cmdPreview(
   const backend = await makeBackend(rt, opts.local);
   const store = backend.bundleStore(fullId, dir);
   const { kind, data } = await openPreview(mk, store);
+  if (kind === "text") {
+    out(data.toString("utf8")); // 文本预览直接打 stdout（--out 忽略）
+    return;
+  }
   const ext = kind === "audio" ? "mp3" : "jpg";
   const outPath = join(opts.out ?? ".", `${fullId.slice(0, 12)}-preview.${ext}`);
   await mkdir(dirname(outPath), { recursive: true });

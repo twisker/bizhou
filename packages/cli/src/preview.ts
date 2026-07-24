@@ -5,13 +5,13 @@
  * - 音频 → 前 15 秒低码率片段（依赖 ffmpeg）
  * - 文本/代码 → 前 32KB（UTF-8 边界安全，零外部依赖）
  * - 压缩包（zip/tar/tar.gz）→ 条目名列表（纯解析，有界，见 genArchive）
- * - pdf → 暂返回 null（见 Task 4）
+ * - pdf → 首页缩略图（可选依赖 pdftoppm，缺失/失败时静默返回 null，见 genPdf）
  * 生成的字节交给核心库用 DEK 加密为 preview.part。
  */
 
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { mkdtemp, open, readFile, rm } from "node:fs/promises";
+import { mkdtemp, open, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, join, resolve } from "node:path";
 import { createGunzip } from "node:zlib";
@@ -295,6 +295,39 @@ export async function genArchive(path: string): Promise<{ kind: "text"; data: Bu
   }
 }
 
+function pdftoppmBin(): string {
+  return process.env.BIZHOU_PDFTOPPM_BIN ?? "pdftoppm";
+}
+
+function runPdftoppm(args: string[]): Promise<void> {
+  return new Promise((resolvePromise, reject) => {
+    const p = spawn(pdftoppmBin(), args, { stdio: "ignore" });
+    p.on("error", reject); // bin 不存在 → error → 上层 catch → null
+    p.on("close", (code) =>
+      code === 0 ? resolvePromise() : reject(new Error(`pdftoppm 退出码 ${code}`)),
+    );
+  });
+}
+
+/** PDF 首页缩略图：依赖可选外部二进制 pdftoppm。返回 null 表示 pdftoppm 缺失或生成失败（不阻断上传）。 */
+export async function genPdf(path: string): Promise<{ kind: "image"; data: Buffer } | null> {
+  const src = resolve(path);
+  const work = await mkdtemp(join(tmpdir(), "bizhou-pdf-"));
+  try {
+    const prefix = join(work, "pg");
+    // 首页 → png，缩放到宽 320
+    await runPdftoppm(["-png", "-f", "1", "-l", "1", "-scale-to", "320", src, prefix]);
+    // pdftoppm 输出名可能是 pg-1.png / pg-01.png 等，取 work 下第一个 .png
+    const files = (await readdir(work)).filter((f) => f.toLowerCase().endsWith(".png")).sort();
+    if (files.length === 0) return null;
+    return { kind: "image", data: await readFile(join(work, files[0]!)) };
+  } catch {
+    return null; // pdftoppm 缺失或失败：静默降级
+  } finally {
+    await rm(work, { recursive: true, force: true });
+  }
+}
+
 /**
  * 生成预览包。返回 null 表示：不支持的类型 / 生成失败（调用方据此跳过，不阻断上传）。
  */
@@ -313,7 +346,7 @@ export async function generatePreview(
     case "text":
       return genText(src);
     case "pdf":
-      return null; // Task 4 接入 genPdf
+      return genPdf(src);
     case "archive":
       return genArchive(src);
   }
