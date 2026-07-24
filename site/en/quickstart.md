@@ -6,77 +6,69 @@ nav_order: 2
 
 # Quick start
 
-Run the whole pipeline offline first (no login/network), then switch online. Below, `bz` denotes the CLI; when running from source, replace `bz` with `bun packages/cli/src/index.ts`.
+Assuming you've [installed](./install.html) `bz` and have your Baidu credentials ready, just start using it. (If you run from source, replace `bz` with `bun packages/cli/src/index.ts`.)
 
-## A. Offline (`--local`, 5 minutes)
-
-Use a local directory instead of Baidu Netdisk to verify "encrypt → store → restore **byte-for-byte identical**".
+## 1. Initialize (one-time)
 
 ```bash
-# For the demo, put the key root and master password in env (don't do this in production)
-export BIZHOU_HOME=/tmp/bz-demo
-export BIZHOU_MASTER_PASSWORD=demo-pass
-STORE=/tmp/bz-store          # a local dir acting as "the cloud"
+bz init      # set the master password, generate a recovery key
+```
+> **Write down the recovery key and store it offline** — it's the only fallback if you forget your master password.
 
-# 1) Initialize: set master password, generate a recovery key (write it down!)
-bz init
+## 2. Log in to Baidu
 
-# 2) Encrypt & upload a file (with compression and preview)
-bz push ./sample.pdf --local $STORE --compress --preview
-#   → prints a resource ID (a hex string) used to fetch it later
-
-# 3) List (shows real names, requires unlock)
-bz ls --local $STORE
-
-# 4) Preview (text/archive listing prints; media/PDF write a file)
-bz preview <resourceID> --local $STORE
-
-# 5) Restore and verify byte-identity
-bz pull <resourceID> --local $STORE --out /tmp/bz-out
-diff ./sample.pdf /tmp/bz-out/sample.pdf && echo "byte-identical ✓"
+```bash
+bz login     # browser OAuth (or bz login --device for the device-code flow)
 ```
 
-Try directory trees and whole-tree backup:
+## 3. Encrypted upload / restore download
 
 ```bash
-bz mkdir /work/2026 --local $STORE
-bz push ./somedir -r --to /work/2026 --local $STORE   # whole-tree encrypted upload
-bz ls /work -r --local $STORE                          # recursive listing (real names)
-bz pull /work/2026 -r --local $STORE                   # restore the whole tree into the file root
-```
-
-## B. Switch online (real Baidu Netdisk)
-
-```bash
-unset BIZHOU_MASTER_PASSWORD          # interactive input is safer in production
-bz login                              # OAuth login (browser / --device device code)
-# Then drop --local and everything goes to your Baidu Netdisk:
+# Encrypted upload (auto chunk/encrypt, with a preview)
 bz push ./important.zip --preview
+#   → prints a resource ID
+
+# List your resources (shows real names)
 bz ls
+
+# Preview (text/archive listing prints; image/video/PDF write a file)
+bz preview <resourceID>
+
+# Restore into the file root (default: OS Downloads dir)
 bz pull <resourceID>
 ```
+The cloud stores only ciphertext and cannot see your filenames or content; the restored file is **byte-for-byte identical** to the original.
 
-## C. Idempotency, resume, concurrency (worry-free)
-
-- **Push the same file again**: content dedup detects it already exists in the target dir and **skips** it — no duplicates.
-- **Interrupted mid-transfer**: just **re-run the same command** to resume (same key & already-uploaded chunks reused; downloads use a temp file with atomic landing on completion).
-- **Want it faster**: `bz push bigfile --concurrency 8` (4MB-slice concurrency within a chunk; default 4, range 1–16).
-- **Force**: `--force` bypasses dedup/in-flight-lock.
-
-## D. Automatic backup (optional)
+## 4. Directory trees / whole-tree encrypted backup
 
 ```bash
-bz backup add ~/important-dir     # register a backup job
-bz daemon                         # foreground: initial sweep + back up on change + periodic (Ctrl-C to exit)
+bz mkdir /work/2026
+bz push ./somedir -r --to /work/2026     # encrypt & upload a whole directory tree (mirrors structure)
+bz ls /work -r                           # recursive listing (real names)
+bz pull /work/2026 -r                     # restore the whole tree into the file root
+bz mv /work/2026 /archive                 # the cloud is real folders too: mv/cp/rename
+bz rm <resourceID>                        # delete to the recycle bin (managed via bz trash)
+```
+
+## 5. Idempotency, resume, concurrency (automatic, worry-free)
+
+- **Push the same file again** → content dedup finds it already exists and **skips** it — no duplicates.
+- **Interrupted mid-transfer** → just **re-run the same command** to resume (same key & uploaded chunks reused; downloads use a temp file with atomic landing + end-to-end verification on completion).
+- **Want it faster** → `bz push bigfile --concurrency 8` (default 4, range 1–16).
+- **Force** → `--force` bypasses dedup/in-flight-lock.
+
+## 6. Automatic backup (optional)
+
+```bash
+bz backup add ~/important-dir    # register a backup job
+bz daemon                        # foreground: back up on change + periodic sweep (Ctrl-C to exit)
 ```
 See [Backup & daemon](./guide-backup.html).
 
-## E. Shell completion (optional)
+## 7. Shell completion (optional)
 
 ```bash
-# bash: add to ~/.bashrc
-eval "$(bz completion bash)"
-# zsh / powershell: see the Sharing & shell completion guide
+eval "$(bz completion bash)"     # bash (zsh / powershell in the completion guide)
 ```
 
 Next → [Core concepts](./concepts.html) · [Command reference](./commands.html)

@@ -12,7 +12,7 @@ Below, `bz` denotes the CLI (replace with `bun packages/cli/src/index.ts` when r
 
 | Option | Description |
 |---|---|
-| `--local <dir>` | use a local directory instead of Baidu Netdisk (offline/self-hosted) |
+| `--local <dir>` | use a local directory instead of Baidu Netdisk (local/self-hosted) |
 | `--password-stdin` | read the master password from stdin (scripting) |
 | `-h`, `--help` | show help |
 | `-v`, `--version` | show version |

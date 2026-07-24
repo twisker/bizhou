@@ -8,7 +8,7 @@
 - **技术栈**：TypeScript + Bun（兼容 Node LTS），加密用运行时内置 `crypto`
 - **存储后端**：用户自己的百度网盘（官方开放平台 API，沙盒目录 `/apps/bizhou/`）
 - **授权**：Apache-2.0
-- **状态**：功能完备（加密内核 + 完整 CLI + 云端文件系统层 + 并发/续传/去重 + 备份守护 + shell 补全 + 多类型预览）；`bun test` 全绿，待人工按 git flow 发版
+- **状态**：**已发布 v1.0.0**（加密内核 + 完整 CLI + 云端文件系统层 + 并发/续传/去重 + 备份守护 + shell 补全 + 多类型预览）；`bun test` 全绿。npm / Homebrew / Scoop 均可安装
 - **文档站**：<https://twisker.github.io/bizhou/>（中文 / English）
 
 ---
@@ -72,23 +72,23 @@
 - 云端保留**随机 bundle 名**（隐私）；本地/`bz ls` 显示**真名**（从解密的 encMeta 读出）。
 - 本地两个可配置根：**密钥根**（默认 `~/.bizhou`，环境变量 `BIZHOU_HOME`）存密钥/账号/配置；**文件根**（默认系统下载目录，`BIZHOU_FILE_ROOT`）存下载还原的文件。
 
-## 快速开始（离线体验，无需登录/网络）
+## 快速开始
 
-用本地目录 `--local` 代替百度网盘，跑通「加密 → 存 → 还原字节一致」：
+[安装](#安装) `bz` 后：
 
 ```bash
-pnpm install
-IDX=packages/cli/src/index.ts
-export BIZHOU_HOME=/tmp/bz-demo BIZHOU_MASTER_PASSWORD=demo-pass
+bz init                          # 设主密码，生成恢复密钥（务必抄下恢复密钥）
+bz login                         # 浏览器 OAuth 登录百度
 
-bun $IDX init                                              # 设主密码、生成恢复密钥
-bun $IDX push ./任意文件.pdf --local /tmp/bz-store --compress --preview
-bun $IDX ls   --local /tmp/bz-store                         # 显示真名（需已解锁）
-bun $IDX preview <资源ID> --local /tmp/bz-store             # 预览（文本/列表打印，媒体落文件）
-bun $IDX pull <资源ID> --local /tmp/bz-store --out /tmp/bz-out   # 还原，字节级一致
+bz push ./重要资料.zip --preview   # 加密上传 → 输出资源 ID
+bz ls                            # 列出资源（显示真名）
+bz preview <资源ID>               # 预览（文本/压缩包列表打印，媒体/PDF 落文件）
+bz pull <资源ID>                  # 还原到文件根，字节级一致
+
+bz push ./某目录 -r --to /工作     # 整个目录树加密备份
 ```
 
-联网使用则先 `bun $IDX login`（OAuth 登录百度），之后 push/pull 省略 `--local` 即走你的百度网盘。完整教程见**文档站**。
+完整教程见[文档站 · 快速开始](https://twisker.github.io/bizhou/zh/quickstart.html)。
 
 ## CLI 一览（`bz`）
 
@@ -106,11 +106,25 @@ bun $IDX pull <资源ID> --local /tmp/bz-store --out /tmp/bz-out   # 还原，�
 | `bz daemon` | 前台守护：启动即扫 + 实时监听 + 定时兜底备份 |
 | `bz completion <bash\|zsh\|powershell>` | 输出 shell 补全脚本 |
 
-通用选项：`--local <dir>`（本地后端，离线/自建）、`--password-stdin`（脚本化读口令）、`-h/--help`、`-v/--version`。完整参考见文档站的**命令参考**。
+通用选项：`--local <dir>`（本地/自建后端）、`--password-stdin`（脚本化读口令）、`-h/--help`、`-v/--version`。完整参考见文档站的**命令参考**。
 
 ## 安装
 
-当前从源码运行（见「快速开始」）。发布渠道（npm `@bizhou/cli`、Homebrew tap、Scoop bucket）打包脚本已就绪，正式发布待人工触发。
+安装后的 `bz` 运行需要 **Node.js**。
+
+```bash
+# npm（跨平台）
+npm i -g @bizhou/cli
+#   或一次性：npx @bizhou/cli --help
+
+# Homebrew（macOS / Linux）
+brew tap twisker/bizhou && brew install bizhou
+
+# Scoop（Windows）
+scoop bucket add bizhou https://github.com/twisker/scoop-bizhou && scoop install bizhou
+```
+
+装完 `bz --version` 应为 `1.0.0`。从源码运行见「快速开始」。详见[文档站 · 安装](https://twisker.github.io/bizhou/zh/install.html)。
 
 ## 前置准备
 
@@ -138,7 +152,8 @@ pnpm run build          # 构建 core（ESM+d.ts）与自包含 CLI
 - ✅ **M1** — 核心库 + CLI 全 pipeline；预览、7z-AES 导出、多账号；>4GB 大文件。
 - ✅ **v2** — 云端文件系统层：真实目录树、双可配本地根、`mv/cp/rename`、回收站、`-r` 递归整树。
 - ✅ **Phase 3（打磨与生态，仅 CLI）** — 健壮上传（并发/续传/去重/在飞锁）、健壮下载（幂等/分片续传/端到端校验）、daemon/定时备份、shell 补全、更多预览类型。
-- ⏳ **待办** — 正式发布（npm/Homebrew/Scoop）；进 homebrew-core / winget（待用户量）。
+- ✅ **发布** — v1.0.0 已发布：GitHub Release + npm（`@bizhou/cli`/`@bizhou/core`）+ Homebrew tap + Scoop bucket + 文档站。
+- ⏳ **后续** — 进 homebrew-core / winget（待用户量）。
 
 ## 授权
 

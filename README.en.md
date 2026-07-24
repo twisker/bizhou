@@ -8,7 +8,7 @@
 - **Stack**: TypeScript + Bun (Node LTS compatible); encryption uses the runtime's built-in `crypto`
 - **Storage backend**: your own Baidu Netdisk (official Open Platform API, sandbox dir `/apps/bizhou/`)
 - **License**: Apache-2.0
-- **Status**: feature-complete (crypto core + full CLI + cloud filesystem layer + concurrency/resume/dedup + backup daemon + shell completion + multi-type previews); `bun test` green, awaiting a human-driven git-flow release
+- **Status**: **released v1.0.0** (crypto core + full CLI + cloud filesystem layer + concurrency/resume/dedup + backup daemon + shell completion + multi-type previews); `bun test` green. Installable via npm / Homebrew / Scoop
 - **Docs site**: <https://twisker.github.io/bizhou/> (中文 / English)
 
 ---
@@ -72,23 +72,23 @@ Each "resource" is physically a **bundle folder** with a `.bz` suffix (it appear
 - The cloud keeps a **random bundle name** (privacy); locally / `bz ls` show the **real name** (read from the decrypted encMeta).
 - Two configurable local roots: the **key root** (default `~/.bizhou`, env `BIZHOU_HOME`) holds keys/accounts/config; the **file root** (default the OS Downloads dir, `BIZHOU_FILE_ROOT`) holds restored files.
 
-## Quick start (offline, no login/network)
+## Quick start
 
-Use a local directory via `--local` instead of Baidu Netdisk to prove "encrypt → store → restore byte-identical":
+After [installing](#install) `bz`:
 
 ```bash
-pnpm install
-IDX=packages/cli/src/index.ts
-export BIZHOU_HOME=/tmp/bz-demo BIZHOU_MASTER_PASSWORD=demo-pass
+bz init                          # set master password, generate recovery key (write it down!)
+bz login                         # browser OAuth login to Baidu
 
-bun $IDX init                                              # set master password, generate recovery key
-bun $IDX push ./anyfile.pdf --local /tmp/bz-store --compress --preview
-bun $IDX ls   --local /tmp/bz-store                         # shows real names (requires unlock)
-bun $IDX preview <resourceID> --local /tmp/bz-store         # preview (text/listing prints; media writes a file)
-bun $IDX pull <resourceID> --local /tmp/bz-store --out /tmp/bz-out   # restore, byte-for-byte identical
+bz push ./important.zip --preview  # encrypted upload → prints a resource ID
+bz ls                            # list resources (real names)
+bz preview <resourceID>          # preview (text/archive listing prints; media/PDF write a file)
+bz pull <resourceID>             # restore into the file root, byte-for-byte identical
+
+bz push ./somedir -r --to /work  # encrypted backup of a whole directory tree
 ```
 
-For online use, run `bun $IDX login` (OAuth) first; then push/pull without `--local` go to your Baidu Netdisk. Full tutorials are on the **docs site**.
+Full tutorials on the [docs site · Quick start](https://twisker.github.io/bizhou/en/quickstart.html).
 
 ## CLI at a glance (`bz`)
 
@@ -106,11 +106,25 @@ For online use, run `bun $IDX login` (OAuth) first; then push/pull without `--lo
 | `bz daemon` | foreground daemon: initial sweep + live watch + periodic backup |
 | `bz completion <bash\|zsh\|powershell>` | print a shell-completion script |
 
-Common options: `--local <dir>` (local backend, offline/self-hosted), `--password-stdin` (scripted password input), `-h/--help`, `-v/--version`. See the **Command Reference** on the docs site for full details.
+Common options: `--local <dir>` (local/self-hosted backend), `--password-stdin` (scripted password input), `-h/--help`, `-v/--version`. See the **Command Reference** on the docs site for full details.
 
 ## Install
 
-Currently run from source (see Quick start). Distribution channels (npm `@bizhou/cli`, a Homebrew tap, a Scoop bucket) have packaging scripts ready; the actual release is triggered manually.
+The installed `bz` needs **Node.js** to run.
+
+```bash
+# npm (cross-platform)
+npm i -g @bizhou/cli
+#   or one-off: npx @bizhou/cli --help
+
+# Homebrew (macOS / Linux)
+brew tap twisker/bizhou && brew install bizhou
+
+# Scoop (Windows)
+scoop bucket add bizhou https://github.com/twisker/scoop-bizhou && scoop install bizhou
+```
+
+After installing, `bz --version` should print `1.0.0`. To run from source, see Quick start. Details on the [docs site · Install](https://twisker.github.io/bizhou/en/install.html).
 
 ## Prerequisites
 
@@ -138,7 +152,8 @@ pnpm run build          # build core (ESM+d.ts) and the self-contained CLI
 - ✅ **M1** — core lib + CLI full pipeline; previews, 7z-AES export, multi-account; >4GB files.
 - ✅ **v2** — cloud filesystem layer: real directory trees, two configurable local roots, `mv/cp/rename`, recycle bin, `-r` recursive whole-tree.
 - ✅ **Phase 3 (polish & ecosystem, CLI-only)** — robust upload (concurrency/resume/dedup/in-flight-lock), robust download (idempotent/chunk-resume/end-to-end verify), daemon/scheduled backup, shell completion, more preview types.
-- ⏳ **Pending** — formal release (npm/Homebrew/Scoop); homebrew-core / winget (once there's a user base).
+- ✅ **Release** — v1.0.0 shipped: GitHub Release + npm (`@bizhou/cli`/`@bizhou/core`) + Homebrew tap + Scoop bucket + docs site.
+- ⏳ **Next** — homebrew-core / winget (once there's a user base).
 
 ## License
 

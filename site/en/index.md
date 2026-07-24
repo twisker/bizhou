@@ -14,7 +14,7 @@ permalink: /en/
 ## Start here
 
 1. [**Install & prerequisites**](./install.html) — Bun/pnpm, Baidu credentials, optional preview tools.
-2. [**Quick start**](./quickstart.html) — prove "encrypt → store → restore byte-identical" offline in 5 minutes, then go online.
+2. [**Quick start**](./quickstart.html) — log in and run the whole flow in 5 minutes: encrypted upload → restore, byte-for-byte identical.
 3. [**Core concepts**](./concepts.html) — end-to-end encryption, bundles, dual local roots, cloud dir trees.
 4. [**Command reference**](./commands.html) — every `bz` command, flag, and example.
 
