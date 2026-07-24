@@ -4,14 +4,17 @@
  * - 视频 → 抽一帧缩略图（依赖 ffmpeg）
  * - 音频 → 前 15 秒低码率片段（依赖 ffmpeg）
  * - 文本/代码 → 前 32KB（UTF-8 边界安全，零外部依赖）
- * - pdf/archive → 暂返回 null（分别见 Task 4 / Task 3）
+ * - 压缩包（zip/tar/tar.gz）→ 条目名列表（纯解析，有界，见 genArchive）
+ * - pdf → 暂返回 null（见 Task 4）
  * 生成的字节交给核心库用 DEK 加密为 preview.part。
  */
 
 import { spawn } from "node:child_process";
+import { createReadStream } from "node:fs";
 import { mkdtemp, open, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { extname, join, resolve } from "node:path";
+import { createGunzip } from "node:zlib";
 import type { PreviewKind } from "@bizhou/core";
 
 const IMAGE_EXT = new Set([".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".heic"]);
@@ -165,6 +168,123 @@ async function genFfmpeg(
   }
 }
 
+const ARCHIVE_MAX_ENTRIES = 500;
+
+/** 流式 tar 头解析器：只取文件名、按 size 跳过数据块，够 N 条或遇零块即停。内存有界。 */
+class TarLister {
+  private names: string[] = [];
+  private buf: Buffer = Buffer.alloc(0);
+  private skip = 0; // 待丢弃的数据字节
+  done = false;
+
+  feed(chunk: Buffer): void {
+    if (this.done) return;
+    let data = chunk;
+    if (this.skip > 0) {
+      const drop = Math.min(this.skip, data.length);
+      this.skip -= drop;
+      data = data.subarray(drop);
+      if (data.length === 0) return;
+    }
+    this.buf = this.buf.length ? Buffer.concat([this.buf, data]) : data;
+    while (this.buf.length >= 512) {
+      const block = this.buf.subarray(0, 512);
+      if (block.every((b) => b === 0)) {
+        this.done = true;
+        return;
+      }
+      const raw = block.subarray(0, 100);
+      const nul = raw.indexOf(0);
+      const name = raw.toString("utf8", 0, nul === -1 ? 100 : nul);
+      const sizeStr = block.toString("ascii", 124, 136).replace(/\0.*$/, "").trim();
+      const size = Number.parseInt(sizeStr, 8) || 0;
+      if (name) this.names.push(name);
+      if (this.names.length >= ARCHIVE_MAX_ENTRIES) {
+        this.done = true;
+        return;
+      }
+      const dataLen = Math.ceil(size / 512) * 512;
+      this.buf = this.buf.subarray(512);
+      const inBuf = Math.min(dataLen, this.buf.length);
+      this.buf = this.buf.subarray(inBuf);
+      this.skip = dataLen - inBuf;
+      if (this.skip > 0) return;
+    }
+  }
+
+  result(): string[] {
+    return this.names;
+  }
+}
+
+function listTar(buf: Buffer): string[] {
+  const l = new TarLister();
+  l.feed(buf);
+  return l.result();
+}
+
+function listZip(buf: Buffer): string[] {
+  const EOCD = 0x06054b50;
+  let p = buf.length - 22;
+  const min = Math.max(0, buf.length - 22 - 0xffff);
+  for (; p >= min; p--) {
+    if (p + 4 <= buf.length && buf.readUInt32LE(p) === EOCD) break;
+  }
+  if (p < min) throw new Error("no EOCD");
+  const count = buf.readUInt16LE(p + 10);
+  let off = buf.readUInt32LE(p + 16);
+  const names: string[] = [];
+  for (let i = 0; i < count && i < ARCHIVE_MAX_ENTRIES; i++) {
+    if (off + 46 > buf.length || buf.readUInt32LE(off) !== 0x02014b50) break;
+    const nameLen = buf.readUInt16LE(off + 28);
+    const extraLen = buf.readUInt16LE(off + 30);
+    const commentLen = buf.readUInt16LE(off + 32);
+    names.push(buf.toString("utf8", off + 46, off + 46 + nameLen));
+    off += 46 + nameLen + extraLen + commentLen;
+  }
+  return names;
+}
+
+function listTarGz(path: string): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const lister = new TarLister();
+    const gunzip = createGunzip();
+    const rs = createReadStream(path);
+    const finish = (): void => {
+      rs.destroy();
+      gunzip.destroy();
+      resolve(lister.result());
+    };
+    gunzip.on("data", (c: Buffer) => {
+      lister.feed(c);
+      if (lister.done) finish();
+    });
+    gunzip.on("end", () => resolve(lister.result()));
+    gunzip.on("error", reject);
+    rs.on("error", reject);
+    rs.pipe(gunzip);
+  });
+}
+
+/** 压缩包预览：列出条目名（zip 中央目录 / tar 头 / tar.gz 流式早停），有界、不缓冲文件数据。 */
+export async function genArchive(path: string): Promise<{ kind: "text"; data: Buffer } | null> {
+  const lower = path.toLowerCase();
+  const ext = extname(lower);
+  try {
+    let names: string[];
+    if (ext === ".zip") names = listZip(await readFile(path));
+    else if (ext === ".tgz" || lower.endsWith(".tar.gz")) names = await listTarGz(path);
+    else if (ext === ".tar") names = listTar(await readFile(path));
+    else return null;
+    if (names.length === 0) return null;
+    let text = names.join("\n");
+    if (names.length >= ARCHIVE_MAX_ENTRIES) text += `\n…（仅列前 ${ARCHIVE_MAX_ENTRIES} 条）`;
+    return { kind: "text", data: Buffer.from(text, "utf8") };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 生成预览包。返回 null 表示：不支持的类型 / 生成失败（调用方据此跳过，不阻断上传）。
  */
@@ -185,6 +305,6 @@ export async function generatePreview(
     case "pdf":
       return null; // Task 4 接入 genPdf
     case "archive":
-      return null; // Task 3 接入 genArchive
+      return genArchive(src);
   }
 }
