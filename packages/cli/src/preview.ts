@@ -197,7 +197,7 @@ class TarLister {
       const nul = raw.indexOf(0);
       const name = raw.toString("utf8", 0, nul === -1 ? 100 : nul);
       const sizeStr = block.toString("ascii", 124, 136).replace(/\0.*$/, "").trim();
-      const size = Number.parseInt(sizeStr, 8) || 0;
+      const size = Math.max(0, Number.parseInt(sizeStr, 8) || 0);
       if (name) this.names.push(name);
       if (this.names.length >= ARCHIVE_MAX_ENTRIES) {
         this.done = true;
@@ -245,19 +245,29 @@ function listZip(buf: Buffer): string[] {
   return names;
 }
 
+/** tar.gz 扫描允许解压的总字节上限（防解压弹：巨大 size 声明 + 可压缩填充导致的耗时 DoS）。 */
+const ARCHIVE_MAX_SCAN_BYTES = 64 * 1024 * 1024;
+
 function listTarGz(path: string): Promise<string[]> {
   return new Promise((resolve, reject) => {
     const lister = new TarLister();
     const gunzip = createGunzip();
     const rs = createReadStream(path);
+    let totalDecompressed = 0;
     const finish = (): void => {
       rs.destroy();
       gunzip.destroy();
       resolve(lister.result());
     };
     gunzip.on("data", (c: Buffer) => {
-      lister.feed(c);
-      if (lister.done) finish();
+      totalDecompressed += c.length;
+      try {
+        lister.feed(c);
+      } catch {
+        finish();
+        return;
+      }
+      if (lister.done || totalDecompressed > ARCHIVE_MAX_SCAN_BYTES) finish();
     });
     gunzip.on("end", () => resolve(lister.result()));
     gunzip.on("error", reject);

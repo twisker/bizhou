@@ -90,4 +90,76 @@ describe("genArchive", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  test("损坏/截断 .tar.gz → null（不抛）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bizhou-parc4-"));
+    try {
+      const p = join(dir, "trunc.tar.gz");
+      // 用足够多的条目撑大 tar，确保按比例截断落在结束零块之前，
+      // 让 gunzip 在数据流中途触发 "unexpected end of file"（而不是先看到收尾零块提前 finish）。
+      const names = Array.from({ length: 50 }, (_, i) => `file${i}.txt`);
+      const full = gzipSync(makeTar(names));
+      const truncated = full.subarray(0, Math.floor(full.length * 0.5));
+      await writeFile(p, truncated);
+      expect(await genArchive(p)).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("直接 .tar（未压缩）→ 列出文件名", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bizhou-parc5-"));
+    try {
+      const p = join(dir, "x.tar");
+      await writeFile(p, makeTar(["a", "b"]));
+      const r = await genArchive(p);
+      const text = r!.data.toString("utf8");
+      expect(text).toContain("a");
+      expect(text).toContain("b");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("tar 头巨大 size 跨块 → 仍返回头名，不崩溃/不挂起（有界）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bizhou-parc6-"));
+    try {
+      const p = join(dir, "huge.tar.gz");
+      const header = Buffer.alloc(512);
+      header.write("huge-entry", 0, "utf8");
+      // octal size：几 MB 的数据块，测试跨 chunk 的 skip 计数器与新增的解压字节上限。
+      const sizeBytes = 4 * 1024 * 1024; // 4MB
+      const sizeOctal = sizeBytes.toString(8).padStart(11, "0");
+      header.write(`${sizeOctal}\0`, 124, "ascii");
+      const dataLen = Math.ceil(sizeBytes / 512) * 512;
+      const padding = Buffer.alloc(dataLen); // 全零，压缩后很小（对抗解压弹的典型构造）
+      const endBlocks = Buffer.alloc(1024); // 两个零块结束
+      const tarBuf = Buffer.concat([header, padding, endBlocks]);
+      await writeFile(p, gzipSync(tarBuf));
+      const r = await genArchive(p);
+      expect(r).not.toBeNull();
+      const text = r!.data.toString("utf8");
+      expect(text).toContain("huge-entry");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("zip EOCD 声明超大条目数但缓冲区极小 → null（不越界、不挂起）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bizhou-parc7-"));
+    try {
+      const p = join(dir, "evil.zip");
+      // EOCD 记录声明 total entries = 0xFFFF，但整份 buffer 只有 EOCD 本身这么大，
+      // 中央目录 offset/size 指向不存在的数据。
+      const eocd = Buffer.alloc(22);
+      eocd.writeUInt32LE(0x06054b50, 0);
+      eocd.writeUInt16LE(0xffff, 10); // total entries
+      eocd.writeUInt32LE(0xffff, 12); // cd size（虚假，超出 buffer）
+      eocd.writeUInt32LE(0, 16); // cd offset
+      await writeFile(p, eocd);
+      expect(await genArchive(p)).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
