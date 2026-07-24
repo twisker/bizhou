@@ -167,6 +167,7 @@ function dynamicCtxFor(
 
 export function genBash(): string {
   const cmds = allCommandNames();
+  // TODO(C1 follow-up): value-flag valueArg completion (--out → dir) not yet wired
   // 每个"有子命令或动态/文件槽"的命令生成一段 case 分支
   const perCmd = COMMANDS.map((c) => {
     const subs = subNamesFor(c.name);
@@ -218,22 +219,24 @@ complete -F _bz bz
 
 export function genZsh(): string {
   const cmds = allCommandNames();
+  // TODO(C1 follow-up): value-flag valueArg completion (--out → dir) not yet wired
   const perCmd = COMMANDS.map((c) => {
     const subs = subNamesFor(c.name);
     const dyn = dynamicCtxFor(c.name);
     const body: string[] = [];
     if (subs) {
-      body.push(`      if (( CURRENT == 2 )); then compadd ${subs}; return; fi`);
+      // zsh $words 1-索引：words[1]=bz words[2]=command words[3]=subcommand
+      body.push(`      if (( CURRENT == 3 )); then compadd ${subs}; return; fi`);
       for (const sub of subNameList(c.name)) {
         const d = dynamicCtxFor(c.name, sub);
         if (d?.kind === "dynamic")
           body.push(
-            `      [[ "\${words[2]}" == "${sub}" ]] && { compadd \${(f)"$(bz __complete ${d.ctx})"}; return; }`,
+            `      [[ "\${words[3]}" == "${sub}" ]] && { compadd \${(f)"$(bz __complete ${d.ctx})"}; return; }`,
           );
         else if (d?.kind === "dir")
-          body.push(`      [[ "\${words[2]}" == "${sub}" ]] && { _files -/; return; }`);
+          body.push(`      [[ "\${words[3]}" == "${sub}" ]] && { _files -/; return; }`);
         else if (d?.kind === "file")
-          body.push(`      [[ "\${words[2]}" == "${sub}" ]] && { _files; return; }`);
+          body.push(`      [[ "\${words[3]}" == "${sub}" ]] && { _files; return; }`);
       }
     } else if (dyn?.kind === "dynamic") {
       body.push(`      compadd \${(f)"$(bz __complete ${dyn.ctx})"}; return;`);
@@ -249,7 +252,8 @@ export function genZsh(): string {
   return `#compdef bz
 # zsh completion for bz —— 安装：bz completion zsh > "\${fpath[1]}/_bz"（或 eval）
 _bz() {
-  local -a words; words=("\${words[@]}")
+  # $words/$CURRENT 由 zsh 补全 widget 提供（1-索引：words[1]=bz words[2]=command）
+  # 切勿 local -a words 重声明——会先掩蔽再赋值成空数组，令下方 case 全部落空。
   if (( CURRENT == 2 )); then
     compadd ${cmds}; return
   fi
