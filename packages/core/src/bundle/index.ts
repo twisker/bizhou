@@ -21,7 +21,7 @@ export const MANIFEST_FILENAME = "manifest.json";
 export const PREVIEW_FILENAME = "preview.part";
 
 export type Compression = "none" | "gzip";
-export type PreviewKind = "video" | "audio" | "image";
+export type PreviewKind = "video" | "audio" | "image" | "text";
 
 /** 单个加密分片的清单项。 */
 export interface ChunkInfo {
@@ -200,7 +200,7 @@ export function parseManifest(json: string): Manifest {
     }
     const p = o.preview as Record<string, unknown>;
     const kind = req(p, "kind", "string") as string;
-    if (kind !== "video" && kind !== "audio" && kind !== "image") {
+    if (kind !== "video" && kind !== "audio" && kind !== "image" && kind !== "text") {
       throw new ManifestError(`不支持的 preview.kind：${kind}`);
     }
     preview = {

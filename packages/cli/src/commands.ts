@@ -37,6 +37,7 @@ import {
   normalizeCloudPath,
   openMeta,
   openPreview,
+  type PreviewKind,
   packResource,
   parseManifest,
   pollDeviceToken,
@@ -426,7 +427,7 @@ export async function pushOneFile(
     pid: process.pid,
   });
 
-  let preview: { kind: "video" | "audio" | "image"; data: Buffer } | undefined;
+  let preview: { kind: PreviewKind; data: Buffer } | undefined;
   if (opts.preview) {
     const p = await generatePreview(absFile);
     if (p) {
