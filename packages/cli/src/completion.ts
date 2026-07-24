@@ -3,7 +3,7 @@
  * 纯 CLI 层，核心库不改。__complete 只读本地、绝不联网/解锁。
  */
 
-import { readBackups } from "@bizhou/core";
+import { BizhouError, readBackups } from "@bizhou/core";
 import type { Runtime } from "./runtime.ts";
 
 export type ArgKind =
@@ -313,6 +313,26 @@ Register-ArgumentCompleter -Native -CommandName bz -ScriptBlock {
   $cands | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object { [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_) }
 }
 `;
+}
+
+/** 打印指定 shell 的补全脚本到 stdout；非法/缺省 shell 抛 BizhouError 列出支持项。 */
+export function cmdCompletion(shell: string | undefined): void {
+  switch (shell) {
+    case "bash":
+      process.stdout.write(genBash());
+      break;
+    case "zsh":
+      process.stdout.write(genZsh());
+      break;
+    case "powershell":
+      process.stdout.write(genPowerShell());
+      break;
+    default:
+      throw new BizhouError(
+        "INVALID_ARG",
+        `用法：bz completion <bash|zsh|powershell>（不支持：${shell ?? "（空）"}）`,
+      );
+  }
 }
 
 /**

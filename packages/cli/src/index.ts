@@ -33,7 +33,7 @@ import {
   cmdUnlock,
   createRuntime,
 } from "./commands.ts";
-import { cmdComplete } from "./completion.ts";
+import { cmdComplete, cmdCompletion } from "./completion.ts";
 import { cmdBackup, cmdDaemon } from "./daemon.ts";
 import { errorLine, exitCodeFor, info, out } from "./render.ts";
 
@@ -74,6 +74,9 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
   backup rm <id>                           删除备份任务（不动云端已备份数据）
   backup run [<id>]                        手动执行一次备份（省略 id 跑全部）
   daemon                                   前台守护：启动即扫 + 实时监听 + 定时兜底（Ctrl-C 退出）
+
+其它:
+  completion <bash|zsh|powershell>   输出 shell 补全脚本（eval 或写入 rc 文件）
 
 通用选项:
   --local <dir>            用本地目录代替百度网盘（离线测试/自建后端）
@@ -261,6 +264,9 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     case "daemon":
       await cmdDaemon(rt, common);
+      return 0;
+    case "completion":
+      cmdCompletion(positionals[1]);
       return 0;
     case "__complete":
       await cmdComplete(rt, positionals[1] ?? "", positionals[2]);
