@@ -6,35 +6,65 @@ nav_order: 1
 
 # Install & prerequisites
 
-## 1. Runtime
+## Install `bz`
 
-- **[Bun](https://bun.sh)** (primary runtime) and **pnpm** (monorepo package manager).
-- The core lib `@bizhou/core` is also **Node LTS** compatible; the CLI currently runs primarily under Bun.
+> The installed `bz` needs **Node.js** to run. Each method below installs or prompts for that dependency. After installing, just use `bz`.
 
-## 2. Get the source and install deps
+### A. Package managers (recommended)
 
+**npm (cross-platform)**
+```bash
+npm i -g @bizhou/cli      # global install, then use bz directly
+bz --version              # → 1.0.0
+```
+Or run once, no install:
+```bash
+npx @bizhou/cli --help
+```
+
+**Homebrew (macOS / Linux)**
+```bash
+brew tap twisker/bizhou
+brew install bizhou       # pulls in the node dependency
+bz --version
+```
+
+**Scoop (Windows)**
+```powershell
+scoop bucket add bizhou https://github.com/twisker/scoop-bizhou
+scoop install bizhou      # depends on nodejs
+bz --version
+```
+
+> You can also download `bizhou-cli-*.tgz` from the [GitHub Release](https://github.com/twisker/bizhou/releases/latest) and install it manually.
+
+### B. From source (development / early access)
+
+Needs [Bun](https://bun.sh) (the core lib is also Node-LTS compatible) and pnpm:
 ```bash
 git clone https://github.com/twisker/bizhou.git
 cd bizhou
 pnpm install
+bun packages/cli/src/index.ts --help   # use this instead of `bz` when running from source
 ```
 
-Distribution channels (npm `@bizhou/cli`, a Homebrew tap, a Scoop bucket) have packaging scripts ready; the formal release is triggered manually. For now, run from source.
+> The docs write commands as `bz`. If you run from source, replace `bz` with `bun packages/cli/src/index.ts`.
 
-## 3. Baidu Netdisk credentials (only for online use)
+## Baidu Netdisk credentials (only for online use)
 
 The tool **embeds no credentials** — bring your own Baidu Open Platform AppKey / SecretKey:
 
-```bash
-cp .env.example .env
-# edit .env:
-# BAIDU_APP_KEY=your-app-key
-# BAIDU_SECRET_KEY=your-secret-key
+- **Package-manager install**: put a `.env` under `bz`'s key root (default `~/.bizhou`), or use env vars `BAIDU_APP_KEY` / `BAIDU_SECRET_KEY`.
+- **From source**: `cp .env.example .env` at the project root and fill it in.
+
+```
+BAIDU_APP_KEY=your-app-key
+BAIDU_SECRET_KEY=your-secret-key
 ```
 
-> `.env` is gitignored and never committed. For **offline use** (`--local`) no credentials are needed.
+> For a local/self-hosted backend (`--local`) no credentials are needed.
 
-## 4. Optional: preview external tools
+## Optional: preview external tools
 
 Multi-type previews call optional external tools in the CLI layer; **when missing, the corresponding preview is skipped gracefully and upload is unaffected**:
 
@@ -45,7 +75,7 @@ Multi-type previews call optional external tools in the CLI layer; **when missin
 
 Text/code previews and archive listings need **no external tools** (pure built-in implementation).
 
-## 5. Local roots (configurable)
+## Local roots (configurable)
 
 Bìzhǒu uses two configurable local "roots":
 
@@ -54,12 +84,11 @@ Bìzhǒu uses two configurable local "roots":
 | Key root | keys, accounts, config, backup jobs, upload journals | `~/.bizhou` | `BIZHOU_HOME` |
 | File root | restored downloaded files | OS Downloads dir | `BIZHOU_FILE_ROOT` |
 
-## 6. Verify
+## Verify
 
 ```bash
-pnpm run typecheck    # type-check
-bun test              # full suite (currently 200+ green)
-bun packages/cli/src/index.ts --help    # see help
+bz --version     # → 1.0.0
+bz --help        # see all commands
 ```
 
 Next → [Quick start](./quickstart.html)

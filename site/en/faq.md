@@ -27,9 +27,6 @@ Files are split into 100MB logical chunks to dodge Baidu's single-file limit (`-
 ### Do I have to install ffmpeg / pdftoppm?
 No. They're only for **preview generation** and optional — when missing, the corresponding preview is skipped and **upload/download is unaffected**. Text/archive-listing previews need no external tools.
 
-### Can I use it fully offline / locally?
-Yes. Add `--local <dir>` to any command to use a local directory as the backend, no login/network needed — great for offline trials, a self-hosted backend, or testing.
-
 ### Will the daemon occupy/delete my cloud files?
 **It never deletes from the cloud.** The daemon only adds/updates (backup semantics); deleting a local file does not mirror-delete the cloud backup. To clear the cloud use `bz rm` / `bz trash`.
 
