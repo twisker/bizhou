@@ -23,3 +23,11 @@ exclude:
   - Gemfile.lock
   - vendor
   - .jekyll-cache
+
+# 所有页面默认套 just-the-docs 的 default 布局（含侧栏导航/搜索/主题骨架）。
+# 缺此块时页面只输出裸正文（无 <head>/导航），主题不生效。
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
