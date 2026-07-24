@@ -14,6 +14,7 @@
 | H-08 | 联网验证百度**回收站管理接口**是否在开放平台可用（list/restore/clear）。当前 `bz trash *` 对百度后端抛"请到百度网盘 App 操作"兜底；删除进原生回收站已可用。若开放 API 支持，可后续接入 BaiduBackend。 | v2-P4 | P2 | 待验证 |
 | H-09 | `bz daemon` 真机集成验证：`bz backup add <目录>` → `bz daemon` → 改/新增文件 → 观察 stderr 增量上云、未变文件跳过 → Ctrl-C 观察优雅退出（等在飞 sweep 完成再退出，无残留进程）。自动化仅覆盖 `SerialJobRunner`/`sweepJob`/`watchRecursive` 纯逻辑，完整长跑循环 + 信号处理未自动化。 | Phase 3 · D1 | P1 | 待验证 |
 | H-10 | `bz completion powershell` 真机 pwsh 验证：本机（CI/开发环境）无 `pwsh` 二进制，`genPowerShell` 的 flag/文件目录（`CompleteFilename`）/子命令前缀（`-like`）补全逻辑只有字符串/结构断言，未跑过真实 tab 补全。需在装有 PowerShell 7+ 的环境里 `bz completion powershell | Out-String | Invoke-Expression` 后手动敲 `bz push <TAB>`、`bz backup add <TAB>`、`bz account u<TAB>`、`bz push --com<TAB>` 等场景验证候选正确。 | Phase 3 · C1 | P2 | 待验证 |
+| H-11 | `bz preview` 更多类型真机验证：装 poppler 后 `bz push some.pdf --preview` → `bz preview <id> --out .` 看首页缩略图（.jpg）；`bz push a.log --preview` → `bz preview <id>` 看 stdout 文本；`bz push a.tar.gz --preview` → 看文件列表。text/archive/降级路径已自动化，真实 pdftoppm 抽帧未自动化。 | Phase 3 · P1 | P2 | 待验证 |
 
 ---
 
