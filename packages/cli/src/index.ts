@@ -33,6 +33,7 @@ import {
   cmdUnlock,
   createRuntime,
 } from "./commands.ts";
+import { cmdBackup, cmdDaemon } from "./daemon.ts";
 import { errorLine, exitCodeFor, info, out } from "./render.ts";
 
 const HELP = `敝帚 bz —— 客户端加密引擎 CLI
@@ -65,6 +66,13 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
   rename <src> <新名>       改名：bundle 改真名（重写 encMeta）/ 目录 native 改名
   share <id> [--code|--7z] 生成分享码 / 导出 7z-AES（--7z 需 7z 二进制）
   preview <id> [--out <dir>]  下载并解密预览包（图片/视频缩略、音频片段）
+
+备份/守护:
+  backup add <本地目录> [--to <云端目录>]   注册加密备份任务
+  backup list                              列出备份任务
+  backup rm <id>                           删除备份任务（不动云端已备份数据）
+  backup run [<id>]                        手动执行一次备份（省略 id 跑全部）
+  daemon                                   前台守护：启动即扫 + 实时监听 + 定时兜底（Ctrl-C 退出）
 
 通用选项:
   --local <dir>            用本地目录代替百度网盘（离线测试/自建后端）
@@ -240,6 +248,18 @@ async function main(argv: string[]): Promise<number> {
     case "preview":
       if (!positionals[1]) throw new BizhouError("INVALID_ARG", "用法：bz preview <id>");
       await cmdPreview(rt, positionals[1], { ...common, out: values.out as string | undefined });
+      return 0;
+    case "backup":
+      if (!positionals[1]) {
+        throw new BizhouError("INVALID_ARG", "用法：bz backup <add|list|rm> ...");
+      }
+      await cmdBackup(rt, positionals[1], positionals[2], {
+        ...common,
+        to: values.to as string | undefined,
+      });
+      return 0;
+    case "daemon":
+      await cmdDaemon(rt, common);
       return 0;
     default:
       errorLine(`未知命令：${cmd}`);

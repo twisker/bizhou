@@ -6,6 +6,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { type Dirent, readdirSync } from "node:fs";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
@@ -46,6 +47,30 @@ import type { Runtime } from "../../src/runtime.ts";
 /** 不存在的 pid（远超常见 pid_max），用作"已死"进程的探测目标。 */
 const STALE_PID = 2 ** 30;
 
+/**
+ * 同步复现 `walkLocalFiles` 的 DFS 遍历顺序（跳过点号开头的条目，如 `.uploads` 日志目录），
+ * 供 `failOnFile` 机制按"第 N 次新建 bundleStore 对应第 N 个文件"来定位目标文件。
+ */
+function walkFilesSync(dir: string): string[] {
+  const result: string[] = [];
+  const walk = (d: string): void => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (e.name.startsWith(".")) continue;
+      const p = join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile()) result.push(p);
+    }
+  };
+  walk(dir);
+  return result;
+}
+
 /** 包一层 MemoryBundleStore，记录每次 putChunk 的 seq，供测试断言 skipExisting 是否生效。 */
 class RecordingBundleStore implements BundleStore {
   readonly bundleId: string;
@@ -58,7 +83,12 @@ class RecordingBundleStore implements BundleStore {
     this.bundleId = bundleId;
     this.inner = new MemoryBundleStore(bundleId);
   }
+  /** 测试注入：若为 true，putChunk 直接抛错（模拟该文件上传失败），驱动 sweepJob 的 failed 分支。 */
+  shouldFail = false;
   async putChunk(seq: number, data: Buffer): Promise<void> {
+    if (this.shouldFail) {
+      throw new BizhouError("IO", `模拟上传失败（测试注入 failOnFile）：bundle ${this.bundleId}`);
+    }
     this.putChunkCalls.push(seq);
     await this.inner.putChunk(seq, data);
   }
@@ -100,7 +130,16 @@ class MemoryBackend implements Backend {
    * （真实 LocalBackend 对缺失目录容错返回空列表，但 BaiduBackend 会对非零 errno 抛 BizhouError）。
    * 默认 false，保持既有测试的宽松行为；仅在需要复现"目录不存在"回归时开启。
    */
-  constructor(private readonly strictListDir = false) {}
+  /** 已发起过的 bundleStore 新建次数，供 failOnFile 按"第 N 次新建对应第 N 个文件"定位目标。 */
+  private newStoreCount = 0;
+
+  constructor(
+    private readonly strictListDir = false,
+    /** 供 failOnFile 同步扫描定位目标文件的根目录（一般传 rt.fileRoot）。 */
+    private readonly localRoot?: string,
+    /** 若设置，基名含此子串的文件在上传时会由 RecordingBundleStore.putChunk 抛错。 */
+    private readonly failOnFile?: string,
+  ) {}
 
   async mkdir(cloudDir: string): Promise<void> {
     // 内存后端无需真建目录，但需记录"已创建"以配合 strictListDir。
@@ -135,7 +174,18 @@ class MemoryBackend implements Backend {
     const dir = normalizeCloudPath(cloudDir);
     let entry = this.byBundleId.get(bundleId);
     if (!entry) {
-      entry = { dir, store: new RecordingBundleStore(bundleId) };
+      const store = new RecordingBundleStore(bundleId);
+      // 首次为该 bundleId 建 store：视为"这是第 newStoreCount 个正在新建的文件"，
+      // 与 walkLocalFiles 对同一目录树的 DFS 顺序一一对应（同一目录内容在两次扫描间未变）。
+      if (this.failOnFile && this.localRoot) {
+        const ordered = walkFilesSync(this.localRoot);
+        const target = ordered[this.newStoreCount];
+        if (target && basename(target).includes(this.failOnFile)) {
+          store.shouldFail = true;
+        }
+      }
+      this.newStoreCount++;
+      entry = { dir, store };
       this.byBundleId.set(bundleId, entry);
     }
     return entry.store;
@@ -194,6 +244,10 @@ export interface MemoryFixture {
   /** 临时目录：既放待上传的源文件，也充当 rt.paths.dir（密钥根/日志根）。 */
   readonly tmp: string;
   readonly mk: Buffer;
+  /** 驱动 pushOneFile/sweepJob 所需的最小 Runtime 子集（含 fileRoot/paths.dir/now/uploadConcurrency）。 */
+  readonly rt: Runtime;
+  /** 内存 Backend（供 sweepJob 等直接消费 Backend 接口的被测函数使用）。 */
+  readonly backend: Backend;
   pushOneFile(absFile: string, cloudDir: string, opts: PushOneOpts): Promise<PushOneResult>;
   /**
    * 整树 push：对 `srcRoot` 下所有文件（镜像为以 `srcRoot` basename 为根的云端目录树）
@@ -226,13 +280,15 @@ export interface MemoryFixture {
 export interface MemoryFixtureOpts {
   /** 见 MemoryBackend 构造参数说明：开启后 listDir 对未 mkdir 过的目录抛错，模拟 BaiduBackend。 */
   strictListDir?: boolean;
+  /** 若设置，基名含此子串的文件在上传（putChunk）时会抛错，供驱动 sweepJob 的 failed 分支。 */
+  failOnFile?: string;
 }
 
 export async function makeMemoryFixture(opts: MemoryFixtureOpts = {}): Promise<MemoryFixture> {
   const tmp = await mkdtemp(join(tmpdir(), "bizhou-push-fixture-"));
   const mk = randomBytes(32); // 固定长度 32B MK（内容与随机性对测试无关，只要求形状正确）
   const contentKey = deriveContentKey(mk);
-  const backend = new MemoryBackend(opts.strictListDir ?? false);
+  const backend = new MemoryBackend(opts.strictListDir ?? false, tmp, opts.failOnFile);
 
   const rt: Runtime = {
     paths: { dir: tmp, vault: "", secrets: "", deviceKey: "", config: "" },
@@ -240,6 +296,8 @@ export async function makeMemoryFixture(opts: MemoryFixtureOpts = {}): Promise<M
     http: undefined as unknown as Runtime["http"], // pushOneFile 不使用 rt.http
     fileRoot: tmp,
     uploadConcurrency: 4,
+    daemonSweepIntervalMs: 30 * 60 * 1000,
+    daemonDebounceMs: 2_000,
     now: () => Date.now(),
     oauthConfig: () => {
       throw new BizhouError("IO", "内存夹具不支持 oauthConfig");
@@ -257,6 +315,8 @@ export async function makeMemoryFixture(opts: MemoryFixtureOpts = {}): Promise<M
   return {
     tmp,
     mk,
+    rt,
+    backend,
     async pushOneFile(absFile, cloudDir, opts) {
       return pushOneFile(rt, backend, mk, contentKey, absFile, normalizeCloudPath(cloudDir), opts);
     },
@@ -437,6 +497,8 @@ export async function makePullFixture(): Promise<PullFixture> {
     http: undefined as unknown as Runtime["http"], // pullOneBundle 不使用 rt.http
     fileRoot: tmp,
     uploadConcurrency: 4,
+    daemonSweepIntervalMs: 30 * 60 * 1000,
+    daemonDebounceMs: 2_000,
     now: () => Date.now(),
     oauthConfig: () => {
       throw new BizhouError("IO", "内存夹具不支持 oauthConfig");

@@ -37,6 +37,7 @@
 | content | 内容身份 `contentId`：`deriveContentKey(mk)`（HKDF 域分离）+ `hashPlaintextFile`/`hashPlaintextBuffer`（HMAC-SHA256，流式）；仅存加密 `encMeta`，绝不明文落盘/传网 | robust-upload-download-design 2026-07-23 | `packages/core/src/content/` | ✅ 稳定（S1-T1） |
 | journal | 上传/下载日志：一份 JSON 兼作在飞锁 + 续传状态（`journalPath`/`readJournal`/`writeJournal`/`appendDoneChunk`/`removeJournal`/`isLockAlive`）；核心不读时钟，now/pid/TTL 由 CLI 注入 | robust-upload-download-design 2026-07-23 | `packages/core/src/journal/` | ✅ 稳定（S1-T3） |
 | cache | manifest 本地缓存（只存加密态原文），消除去重扫描重复网络拉取；`getCachedManifest`/`putCachedManifest`/`invalidateManifest`，`rename`/`rm`/`trash` 已挂失效钩子 | robust-upload-download-design 2026-07-23 | `packages/core/src/cache/` | ✅ 稳定（S1-T4） |
+| backup | 备份任务模型 + `backups.json` 持久化（`addBackup`/`readBackups`/`removeBackup`/`updateLastBackup`）；纯 IO、无密钥；原子写（唯一 tmp 名防并发写 clobber）、读失败不吞（防 read-modify-write 截断） | daemon-scheduled-backup-design 2026-07-24 | `packages/core/src/backup/` | ✅ 稳定（D1-T1） |
 
 ---
 
@@ -51,6 +52,8 @@
 | preview（生成） | ffmpeg 图片/视频缩略、音频片段 | PRD §9 | `packages/cli/src/preview.ts` | ✅ 稳定 |
 | export7z | 7z-AES 头部加密导出（依赖 7z 二进制，防参数注入） | PRD §10 | `packages/cli/src/export7z.ts` | ✅ 稳定 |
 | skill | bz 作为 agent Skill 的非交互调用说明 | PRD §2/§5 | `packages/cli/skill/SKILL.md` | ✅ 稳定 |
+| daemon | `bz backup add/list/rm/run`（注册式备份任务命令）+ `sweepJob`（幂等 walk+`pushOneFile`，单文件错误隔离）+ `SerialJobRunner`（每任务串行护栏：`run()` 绝不并发，运行中的多次 `trigger()` 合并为一次补跑）+ `cmdDaemon`（启动即扫 + watch + 定时兜底三触发编排，SIGINT/SIGTERM 优雅退出等在飞 sweep drain 完，MK 驻内存至退出并 `mk.fill(0)` best-effort 抹除；备份语义永不删云） | daemon-scheduled-backup-design 2026-07-24 | `packages/cli/src/daemon.ts` | ✅ 稳定（D1-T2/T3/T5） |
+| watcher | 跨平台递归文件监听 + 防抖（`watchRecursive`：darwin/win32 单 recursive watcher 失败回退逐目录；linux 逐目录快照，深层新目录靠 daemon 定时 sweep 兜底）+ `debounce`/`listDirsRecursive`（可独立测试） | daemon-scheduled-backup-design 2026-07-24 | `packages/cli/src/watcher.ts` | ✅ 稳定（D1-T4） |
 
 ---
 

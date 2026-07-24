@@ -61,6 +61,10 @@ export interface Runtime {
   readonly fileRoot: string;
   /** 分片上传默认并发度（config.json `uploadConcurrency` 覆盖，clamp[1,16]，缺省 4）。 */
   readonly uploadConcurrency: number;
+  /** daemon 定时兜底 sweep 间隔 ms（config.json `daemonSweepIntervalMs` 覆盖，min 5s，缺省 30min）。 */
+  readonly daemonSweepIntervalMs: number;
+  /** daemon watcher 防抖 ms（config.json `daemonDebounceMs` 覆盖，min 100ms，缺省 2s）。 */
+  readonly daemonDebounceMs: number;
   now(): number;
   oauthConfig(): OAuthConfig;
   loadVault(): Promise<VaultFile>;
@@ -79,21 +83,29 @@ export function createRuntime(): Runtime {
   const secrets = new FileSecretStore(paths.dir, paths.secrets, paths.deviceKey);
   const accounts = new AccountManager(secrets);
 
-  // 读 config.json 里的 fileRoot / uploadConcurrency（若有）
+  // 读 config.json 里的 fileRoot / uploadConcurrency / daemonSweepIntervalMs / daemonDebounceMs（若有）
   let configFileRoot: string | undefined;
   let configUploadConcurrency: number | undefined;
+  let configDaemonSweepIntervalMs: number | undefined;
+  let configDaemonDebounceMs: number | undefined;
   try {
     const cfg = JSON.parse(readFileSync(paths.config, "utf8")) as {
       fileRoot?: string;
       uploadConcurrency?: number;
+      daemonSweepIntervalMs?: number;
+      daemonDebounceMs?: number;
     };
     configFileRoot = cfg.fileRoot;
     configUploadConcurrency = cfg.uploadConcurrency;
+    configDaemonSweepIntervalMs = cfg.daemonSweepIntervalMs;
+    configDaemonDebounceMs = cfg.daemonDebounceMs;
   } catch {
     /* 无 config.json，忽略 */
   }
   const fileRoot = resolveFileRoot(process.env, process.platform, configFileRoot);
   const uploadConcurrency = Math.min(16, Math.max(1, configUploadConcurrency ?? 4));
+  const daemonSweepIntervalMs = Math.max(5_000, configDaemonSweepIntervalMs ?? 30 * 60 * 1000);
+  const daemonDebounceMs = Math.max(100, configDaemonDebounceMs ?? 2_000);
 
   return {
     paths,
@@ -101,6 +113,8 @@ export function createRuntime(): Runtime {
     http: httpAdapter,
     fileRoot,
     uploadConcurrency,
+    daemonSweepIntervalMs,
+    daemonDebounceMs,
     now: () => Date.now(),
     oauthConfig(): OAuthConfig {
       const appKey = process.env.BAIDU_APP_KEY;

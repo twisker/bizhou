@@ -12,6 +12,7 @@
 |------|------|------------|--------|------|
 | H-07 | `git push` 由人工手动触发（AI 不自动推送；发布等经明确授权的操作除外）。 | 全程 | P0 | 长期有效 |
 | H-08 | 联网验证百度**回收站管理接口**是否在开放平台可用（list/restore/clear）。当前 `bz trash *` 对百度后端抛"请到百度网盘 App 操作"兜底；删除进原生回收站已可用。若开放 API 支持，可后续接入 BaiduBackend。 | v2-P4 | P2 | 待验证 |
+| H-09 | `bz daemon` 真机集成验证：`bz backup add <目录>` → `bz daemon` → 改/新增文件 → 观察 stderr 增量上云、未变文件跳过 → Ctrl-C 观察优雅退出（等在飞 sweep 完成再退出，无残留进程）。自动化仅覆盖 `SerialJobRunner`/`sweepJob`/`watchRecursive` 纯逻辑，完整长跑循环 + 信号处理未自动化。 | Phase 3 · D1 | P1 | 待验证 |
 
 ---
 

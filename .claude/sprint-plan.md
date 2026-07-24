@@ -198,6 +198,27 @@
 
 **验收目标：** 下载往返字节一致；幂等跳过/在飞锁/分片续传/端到端校验各有集成测试；`bun test` 全量无回归；typecheck/lint/build 全过。**续传正确性双保险：** 逐片密文 sha256（下载即校验）+ 装配后端到端 contentId（防日志/flush 竞态跳过实际缺失片）；无 contentId 的旧 bundle 退化为仅前者。**红线：** 端到端校验不过绝不 rename 交付、绝不静默写损坏。
 
+### Phase 3 · D1 — daemon / 定时备份 ✅ **完成（2026-07-24，待人工 git flow 合并）**
+
+> 设计：`docs/superpowers/specs/2026-07-24-daemon-scheduled-backup-design.md`
+> 计划：`docs/superpowers/plans/2026-07-24-daemon-scheduled-backup-d1.md`（含各任务完整 TDD 步骤）
+> 复用 S1 `pushOneFile`（去重/续传/在飞锁兜底）。执行方式：子代理驱动。
+
+| 任务 | 说明 | 责任人 | 状态 |
+|-----|------|--------|------|
+| D1-T1 | 核心备份任务模型 + `backups.json` 持久化（add/list/rm/update，原子，无密钥） | AI | ✅ 已完成 |
+| D1-T2 | CLI `bz backup add/list/rm` 命令（新 `daemon.ts`，单向依赖 commands.ts） | AI | ✅ 已完成 |
+| D1-T3 | `sweepJob` 幂等备份引擎（walk + pushOneFile + 单文件错误隔离）+ `bz backup run` | AI | ✅ 已完成 |
+| D1-T4 | 跨平台递归 watcher + 防抖（debounce/listDirsRecursive 可测；fs.watch 薄壳手动验证） | AI | ✅ 已完成 |
+| D1-T5 | `bz daemon` 三触发编排 + `SerialJobRunner` 串行护栏 + 优雅退出 + config 间隔/防抖 | AI | ✅ 已完成 |
+
+**范围/语义：** 注册式备份任务；三触发（启动即扫 / 实时监听防抖 / 定时兜底）共用幂等 `sweepJob`；**备份语义永不删云**（本地删不镜像）；前台进程、SIGINT/SIGTERM 优雅退出；MK 驻内存至退出。**测试边界：** 模型/引擎/防抖/串行护栏纯逻辑自动化覆盖；`fs.watch` OS 事件与完整 daemon 长跑 = 手动/集成验证（待人工真机验证 H-09）。**红线：** daemon 不打印密钥；加密全复用 S1；零新依赖。
+
+**验收（达成）：** `bun test` **181 全绿 + 1 skip**；typecheck/lint/build(3) 全过。opus 整分支最终评审 **✅ Ready to merge**（安全红线全过：不打印密钥、MK 全退出路径 `finally` 抹除、永不删云；镜像路径与 `push -r` 逐字一致；跨进程靠 S1 在飞锁防重传）。
+**评审拦下并修复的 Important（各任务）：** ①`readBackups` 读失败吞错→会截断任务注册（改：ENOENT/损坏→[]，其它 IO 错误→抛）+ 唯一 tmp 防并发写 clobber（T1）②`watchRecursive.stop()` 与异步注册竞态→泄漏 FSWatcher/卡退出（改：`stopped` 守卫）（T4）③`SerialJobRunner` run() 抛错→丢合并补跑 & `drain()` reject 致退出挂死（改：loop 吞逃逸异常）+ daemon `try/finally` 抹 MK + `once` 信号 + drain `.catch`（T5）。
+**已知限制（defer）：** `bz backup add` 与运行中 daemon 的 `updateLastBackup` 对 `backups.json` 有 last-writer-wins 竞态，极端下新加任务可能被覆盖——单用户工具、`backup list` 可见、重跑 add 即修复；不损云端数据。id 为 32-bit 随机（个人规模碰撞可忽略）；空源目录不建空云端镜像目录。
+
 ### Phase 3 · 其余候选（待细化）
 
-> shell 补全、更多预览类型、daemon/定时备份、进 homebrew-core / winget、worker_threads 并行加密（网络场景零收益，仅 gzip/纯本地备份时再评估）。各自 spec→plan→执行。
+> shell 补全、更多预览类型、进 homebrew-core / winget、worker_threads 并行加密（网络场景零收益，仅 gzip/纯本地备份时再评估）。各自 spec→plan→执行。
+> （daemon/定时备份 已细化为上方 D1；worker_threads 已由 S1 澄清定型为上传并发。）
