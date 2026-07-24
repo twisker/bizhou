@@ -1,6 +1,6 @@
 {
   "name": "@bizhou/core",
-  "version": "0.2.71",
+  "version": "0.2.72",
   "description": "敝帚核心库：AES-256-GCM 信封加密、bundle/manifest、分片、百度对接、预览、7z 导出。纯逻辑、无交互、只发进度事件。",
   "type": "module",
   "main": "./src/index.ts",

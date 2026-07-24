@@ -1,6 +1,6 @@
 {
   "name": "bizhou-monorepo",
-  "version": "0.2.71",
+  "version": "0.2.72",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.5.2",

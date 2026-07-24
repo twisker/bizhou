@@ -218,7 +218,22 @@
 **评审拦下并修复的 Important（各任务）：** ①`readBackups` 读失败吞错→会截断任务注册（改：ENOENT/损坏→[]，其它 IO 错误→抛）+ 唯一 tmp 防并发写 clobber（T1）②`watchRecursive.stop()` 与异步注册竞态→泄漏 FSWatcher/卡退出（改：`stopped` 守卫）（T4）③`SerialJobRunner` run() 抛错→丢合并补跑 & `drain()` reject 致退出挂死（改：loop 吞逃逸异常）+ daemon `try/finally` 抹 MK + `once` 信号 + drain `.catch`（T5）。
 **已知限制（defer）：** `bz backup add` 与运行中 daemon 的 `updateLastBackup` 对 `backups.json` 有 last-writer-wins 竞态，极端下新加任务可能被覆盖——单用户工具、`backup list` 可见、重跑 add 即修复；不损云端数据。id 为 32-bit 随机（个人规模碰撞可忽略）；空源目录不建空云端镜像目录。
 
+### Phase 3 · C1 — shell 补全 📋 **计划就绪，待开跑**
+
+> 设计：`docs/superpowers/specs/2026-07-24-shell-completion-design.md`
+> 计划：`docs/superpowers/plans/2026-07-24-shell-completion-c1.md`（待写）
+> 范围：bash / zsh / PowerShell（不含 fish）；静态 + 本地动态（backup-id/account/shell），云端动态缓做。执行方式：子代理驱动。
+
+| 任务 | 说明 | 责任人 | 状态 |
+|-----|------|--------|------|
+| C1-T1 | 命令规格表（类型 + GLOBAL_FLAGS + COMMANDS，单一真值来源）+ 与 index.ts 命令集一致性测试 | AI | ⬜ 待开始 |
+| C1-T2 | `bz __complete`（本地动态 backup-id/account/shell，**零联网零解锁**，出错静默空）+ 隐藏分发 | AI | ⬜ 待开始 |
+| C1-T3 | 三 shell 生成器（genBash/genZsh/genPowerShell 纯函数，规格表→脚本）+ 生成器测试 | AI | ⬜ 待开始 |
+| C1-T4 | `bz completion <shell>` 命令 + `index.ts` 分发 + HELP | AI | ⬜ 待开始 |
+
+**验收目标：** 三 shell 脚本含全部命令/flag、动态槽正确挂 `bz __complete`、文件槽走原生补全；`__complete` 只读本地、不抛不阻塞；`bun test` 无回归。**红线：** `__complete` 绝不解锁/联网/弹密码、输出无密钥。**测试边界：** 真实 shell tab 行为 = 手动验证（登记人工）。
+
 ### Phase 3 · 其余候选（待细化）
 
-> shell 补全、更多预览类型、进 homebrew-core / winget、worker_threads 并行加密（网络场景零收益，仅 gzip/纯本地备份时再评估）。各自 spec→plan→执行。
-> （daemon/定时备份 已细化为上方 D1；worker_threads 已由 S1 澄清定型为上传并发。）
+> 更多预览类型、进 homebrew-core / winget、worker_threads 并行加密（网络场景零收益，仅 gzip/纯本地备份时再评估）。各自 spec→plan→执行。
+> （daemon/定时备份→D1；shell 补全→C1；worker_threads 已由 S1 澄清定型为上传并发。）
