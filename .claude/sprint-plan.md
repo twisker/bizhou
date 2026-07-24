@@ -235,7 +235,22 @@
 **评审拦下并修复的关键缺陷：** ①`genZsh` 两个 **Critical**——自屏蔽 `words` + 子命令误用 bash 0-索引（`words[2]`）而非 zsh 1-索引（`words[3]`/`CURRENT==3`），真 shell 里只剩顶层补全（评审**执行**生成脚本才发现，子串测试放过）；已修 + 加**执行级**回归测试（source 脚本 + 模拟 widget，zsh/bash 各 2 例）（T3）。②`genPowerShell` **Important**——不补 flag/文件、部分子命令输入失效；已补齐（flag 内嵌 + `CompleteFilename` 文件补全 + `-like` 前缀健壮），逻辑完成但**本机无 pwsh 未执行**→人工 H-10 验证。
 **已知限制（defer）：** `FlagSpec.valueArg`（`--out`→dir 值补全）三生成器均未消费，留 `TODO(C1 follow-up)`；bash 文件槽依赖 `bash-completion`；一致性测试守 COMMANDS-vs-KNOWN（两侧手维护）。**测试边界：** 真实 shell tab 行为（尤其 pwsh）= 人工验证（H-10）。
 
+### Phase 3 · P1 — 更多预览类型 📋 **计划就绪，待开跑**
+
+> 设计：`docs/superpowers/specs/2026-07-24-more-preview-types-design.md`
+> 计划：`docs/superpowers/plans/2026-07-24-more-preview-types-p1.md`（待写）
+> 范围：文本/代码 + PDF 首页 + 压缩包列表（不含 Office）。执行方式：子代理驱动。
+
+| 任务 | 说明 | 责任人 | 状态 |
+|-----|------|--------|------|
+| P1-T1 | 核心 `PreviewKind="text"` + manifest 校验放开 + 往返测试 | AI | ⬜ 待开始 |
+| P1-T2 | `detectStrategy` 重构 + `genText`（前 32KB / UTF-8 边界）+ 测试 | AI | ⬜ 待开始 |
+| P1-T3 | `genArchive`（zip 中央目录 / tar 头 / tar.gz 内置 zlib 流式早停，上限 500 条）+ 测试 | AI | ⬜ 待开始 |
+| P1-T4 | `genPdf`（pdftoppm 可选，降级路径）+ `cmdPreview` text→stdout 分流 + 测试 | AI | ⬜ 待开始 |
+
+**验收目标：** text/archive 零外部依赖生成，PDF 经 pdftoppm 优雅降级；预览字节仍 DEK 加密、云端零可见；`bz preview` text→stdout、媒体→落文件；`bun test` 无回归。**红线：** 生成全在 CLI 层、核心只加密存储；外部工具缺失静默降级不阻断上传；archive 解析有界防耗尽。**测试边界：** 真实 pdftoppm 抽帧 = 手动验证（登记人工）。
+
 ### Phase 3 · 其余候选（待细化）
 
-> 更多预览类型、进 homebrew-core / winget、worker_threads 并行加密（网络场景零收益，仅 gzip/纯本地备份时再评估）。各自 spec→plan→执行。
-> （daemon/定时备份→D1；shell 补全→C1；worker_threads 已由 S1 澄清定型为上传并发。）
+> 进 homebrew-core / winget（待用户量）。worker_threads 已由 S1 澄清定型为上传并发。
+> （daemon→D1；shell 补全→C1；更多预览类型→P1。）
