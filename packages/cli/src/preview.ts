@@ -315,10 +315,11 @@ export async function genPdf(path: string): Promise<{ kind: "image"; data: Buffe
   const work = await mkdtemp(join(tmpdir(), "bizhou-pdf-"));
   try {
     const prefix = join(work, "pg");
-    // 首页 → png，缩放到宽 320
-    await runPdftoppm(["-png", "-f", "1", "-l", "1", "-scale-to", "320", src, prefix]);
-    // pdftoppm 输出名可能是 pg-1.png / pg-01.png 等，取 work 下第一个 .png
-    const files = (await readdir(work)).filter((f) => f.toLowerCase().endsWith(".png")).sort();
+    // 首页 → jpeg，缩放到宽 320。用 -jpeg（非 -png）：kind=image 落地为 .jpg（与 ffmpeg 图片预览、
+    // cmdPreview 的 .jpg 扩展名一致），避免"PNG 字节存成 .jpg"的格式/扩展名不符。
+    await runPdftoppm(["-jpeg", "-f", "1", "-l", "1", "-scale-to", "320", src, prefix]);
+    // pdftoppm 输出名可能是 pg-1.jpg / pg-01.jpg 等，取 work 下第一个 .jpg
+    const files = (await readdir(work)).filter((f) => f.toLowerCase().endsWith(".jpg")).sort();
     if (files.length === 0) return null;
     return { kind: "image", data: await readFile(join(work, files[0]!)) };
   } catch {
