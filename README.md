@@ -8,7 +8,7 @@
 - **技术栈**：TypeScript + Bun（兼容 Node LTS），加密用运行时内置 `crypto`
 - **存储后端**：用户自己的百度网盘（官方开放平台 API，沙盒目录 `/apps/bizhou/`）
 - **授权**：Apache-2.0
-- **状态**：**已发布 v1.0.0**（加密内核 + 完整 CLI + 云端文件系统层 + 并发/续传/去重 + 备份守护 + shell 补全 + 多类型预览）；`bun test` 全绿。npm / Homebrew / Scoop 均可安装
+- **状态**：**已发布 v1.1.0**（加密内核 + 完整 CLI + 云端文件系统层 + 并发/续传/去重 + 备份守护 + shell 补全 + 多类型预览 + **云端保险库/换机恢复**）；`bun test` 全绿。npm / Homebrew / Scoop 均可安装
 - **文档站**：<https://twisker.github.io/bizhou/>（中文 / English）
 
 ---
@@ -126,7 +126,7 @@ brew tap twisker/bizhou && brew install bizhou
 scoop bucket add bizhou https://github.com/twisker/scoop-bizhou && scoop install bizhou
 ```
 
-装完 `bz --version` 应为 `1.0.0`。从源码运行见「快速开始」。详见[文档站 · 安装](https://twisker.github.io/bizhou/zh/install.html)。
+装完 `bz --version` 应为 `1.1.0`。从源码运行见「快速开始」。详见[文档站 · 安装](https://twisker.github.io/bizhou/zh/install.html)。
 
 ## 前置准备
 

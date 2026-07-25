@@ -99,7 +99,7 @@ Bìzhǒu uses two configurable local "roots":
 ## Verify
 
 ```bash
-bz --version     # → 1.0.0
+bz --version     # → 1.1.0
 bz --help        # see all commands
 ```
 

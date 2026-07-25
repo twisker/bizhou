@@ -8,7 +8,7 @@
 
 ---
 
-## 当前 Sprint：v1.1.0 · 云端保险库与配套能力 ✅ 开发完成（2026-07-25，待人工发版）
+## 当前 Sprint：v1.1.0 · 云端保险库与配套能力 ✅ **已发版（2026-07-25）**
 
 **最后更新：** 2026-07-25（T1–T8 全部完成，`bun test` 303 全绿 + 1 skip）
 
@@ -36,7 +36,7 @@
 ### 待人工触发
 | 事项 | 编号 | 状态 |
 |------|------|------|
-| 发版：`scripts/bump-minor.sh` → 1.1.0 → push → npm publish → tap/bucket → GitHub Release | H-12 | 待执行 |
+| ~~发版~~ → 已完成：GitHub Release + npm 两包 + Homebrew tap + Scoop bucket + 文档站 | H-12 | ✅ |
 | 真机联网验证（云端保险库 / 换机 / 改密 / `.trash` / quota；**尤其确认百度是否接受点开头的文件名**） | H-13 | 待验证 |
 | 其余存量人工项（daemon 真机、pwsh 补全、pdftoppm 预览） | H-09~H-11 | 待验证 |
 
@@ -58,4 +58,5 @@
 | 2026-07-25 | 云端保险库落地：vault 原样上云（本身即密文信封），`fetchCloudVault` 严格区分「云端没有」与「取不到/损坏」——后者退化成 null 会让老用户在新机被误判为新用户、`bz init` 铸新 MK、云端数据永久锁死 | `packages/core/src/vault/cloud.ts`、`backend/reserved.ts` |
 | 2026-07-25 | 主密码强度做成**拦截式**关卡（不是提示）：上云后云服务商持有密文可离线爆破，密码强度成为唯一安全边界；`--no-cloud-vault` 是唯一绕过方式且必须显式告知「换机永久锁死」 | `packages/core/src/vault/strength.ts`、`packages/cli/src/commands.ts` |
 | 2026-07-25 | E-5 两条安全约束写进代码：导出恢复密钥强制重输主密码（不认已解锁会话）；`rotateRecoveryKey` 先 `verifyMk`（防用错 MK 覆盖唯一备用入口） | `packages/core/src/vault/index.ts`、`packages/cli/src/commands.ts` |
+| 2026-07-25 | 发版时发现打包 tarball 不可复现（文件 mtime + gzip 头时间戳），与刚公开的「可从 tag 自行复现」承诺冲突；修好 `gen-packaging.sh` 后**重打 v1.1.0 tag**（彼时尚未发布任何产物，代价为零），确保发出去的第一个版本就真能复现 | `scripts/gen-packaging.sh` |
 | 2026-07-25 | E-6 百度回收站改 `.trash` 目录方案（原生 delete 无法管理）；新增带目录语义的假网盘夹具，回收站这类"搬树再搬回"的行为此前无法测 | `packages/core/src/backend/baidu.ts`、`test/helpers/fake-netdisk.ts` |

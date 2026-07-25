@@ -99,7 +99,7 @@ BAIDU_SECRET_KEY=你的SecretKey
 ## 验证安装
 
 ```bash
-bz --version     # → 1.0.0
+bz --version     # → 1.1.0
 bz --help        # 看全部命令
 ```
 

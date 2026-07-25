@@ -8,7 +8,7 @@
 - **Stack**: TypeScript + Bun (Node LTS compatible); encryption uses the runtime's built-in `crypto`
 - **Storage backend**: your own Baidu Netdisk (official Open Platform API, sandbox dir `/apps/bizhou/`)
 - **License**: Apache-2.0
-- **Status**: **released v1.0.0** (crypto core + full CLI + cloud filesystem layer + concurrency/resume/dedup + backup daemon + shell completion + multi-type previews); `bun test` green. Installable via npm / Homebrew / Scoop
+- **Status**: **released v1.1.0** (crypto core + full CLI + cloud filesystem layer + concurrency/resume/dedup + backup daemon + shell completion + multi-type previews + **cloud vault / new-machine recovery**); `bun test` green. Installable via npm / Homebrew / Scoop
 - **Docs site**: <https://twisker.github.io/bizhou/> (中文 / English)
 
 ---
@@ -126,7 +126,7 @@ brew tap twisker/bizhou && brew install bizhou
 scoop bucket add bizhou https://github.com/twisker/scoop-bizhou && scoop install bizhou
 ```
 
-After installing, `bz --version` should print `1.0.0`. To run from source, see Quick start. Details on the [docs site · Install](https://twisker.github.io/bizhou/en/install.html).
+After installing, `bz --version` should print `1.1.0`. To run from source, see Quick start. Details on the [docs site · Install](https://twisker.github.io/bizhou/en/install.html).
 
 ## Prerequisites
 
