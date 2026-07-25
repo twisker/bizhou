@@ -129,4 +129,23 @@ export class LocalBackend implements Backend {
   async clearTrash(): Promise<void> {
     await rm(this.trashRoot, { recursive: true, force: true });
   }
+
+  async putBlob(cloudPath: string, data: Buffer): Promise<void> {
+    const abs = this.abs(cloudPath);
+    await mkdir(dirname(abs), { recursive: true });
+    await writeFile(abs, data);
+  }
+
+  async getBlob(cloudPath: string): Promise<Buffer | null> {
+    try {
+      return await readFile(this.abs(cloudPath));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err; // 其余（权限等）视为真实 IO 失败，如实抛出
+    }
+  }
+
+  async removeBlob(cloudPath: string): Promise<void> {
+    await rm(this.abs(cloudPath), { force: true }); // force：目标不存在时不抛错，幂等
+  }
 }

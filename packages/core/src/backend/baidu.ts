@@ -1,7 +1,12 @@
-import { APP_ROOT, type BaiduClient } from "../baidu/client.ts";
+import { APP_ROOT, type BaiduClient, type RemoteEntry } from "../baidu/client.ts";
 import { BaiduBundleStore } from "../baidu/store.ts";
 import { BUNDLE_SUFFIX } from "../bundle/index.ts";
-import { assertNameSegment, normalizeCloudPath } from "../cloudpath/index.ts";
+import {
+  assertNameSegment,
+  cloudBasename,
+  cloudDirname,
+  normalizeCloudPath,
+} from "../cloudpath/index.ts";
 import { BizhouError } from "../errors.ts";
 import type { Backend, DirListing, TrashEntry } from "./index.ts";
 
@@ -74,5 +79,45 @@ export class BaiduBackend implements Backend {
 
   async clearTrash(): Promise<void> {
     throw new BizhouError("BAIDU", NO_TRASH_MANAGEMENT_MSG);
+  }
+
+  /**
+   * 定位 cloudPath 对应的远端条目：list 父目录后按文件名匹配。
+   * 找不到（含父目录本身不存在——百度 list 对不存在目录会抛错）一律按"没有此 blob"
+   * 处理，返回 undefined；这与 listDir 对不存在目录的既有语义一致（见 local.ts / baidu.ts listDir）。
+   * 真正的网络/鉴权失败会在下一步 filemetas/download/uploadPart 里如实抛出。
+   */
+  private async findBlobEntry(cloudPath: string): Promise<RemoteEntry | undefined> {
+    const dir = cloudDirname(cloudPath);
+    const name = cloudBasename(cloudPath);
+    let entries: RemoteEntry[];
+    try {
+      entries = await this.client.list(this.remote(dir));
+    } catch {
+      return undefined;
+    }
+    return entries.find((e) => !e.isdir && e.filename === name);
+  }
+
+  async putBlob(cloudPath: string, data: Buffer): Promise<void> {
+    normalizeCloudPath(cloudPath); // 校验（拒绝 '..'），复用既有路径规则
+    await this.client.uploadPart(this.remote(cloudPath), data);
+  }
+
+  async getBlob(cloudPath: string): Promise<Buffer | null> {
+    normalizeCloudPath(cloudPath);
+    const entry = await this.findBlobEntry(cloudPath);
+    if (!entry) return null;
+    const metas = await this.client.filemetas([entry.fsId]);
+    const dlink = metas[0]?.dlink;
+    if (!dlink) throw new BizhouError("BAIDU", `无法获取 dlink：${cloudPath}`);
+    return this.client.download(dlink);
+  }
+
+  async removeBlob(cloudPath: string): Promise<void> {
+    normalizeCloudPath(cloudPath);
+    const entry = await this.findBlobEntry(cloudPath);
+    if (!entry) return; // 本就不存在：幂等，不发起删除请求
+    await this.client.deletePaths([this.remote(cloudPath)]);
   }
 }

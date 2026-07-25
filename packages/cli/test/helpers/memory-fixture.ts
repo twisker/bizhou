@@ -238,6 +238,15 @@ class MemoryBackend implements Backend {
   async clearTrash(): Promise<void> {
     /* no-op */
   }
+  async putBlob(): Promise<void> {
+    throw new BizhouError("IO", "内存后端未实现 putBlob（本夹具不需要）");
+  }
+  async getBlob(): Promise<Buffer | null> {
+    throw new BizhouError("IO", "内存后端未实现 getBlob（本夹具不需要）");
+  }
+  async removeBlob(): Promise<void> {
+    throw new BizhouError("IO", "内存后端未实现 removeBlob（本夹具不需要）");
+  }
 }
 
 export interface MemoryFixture {
