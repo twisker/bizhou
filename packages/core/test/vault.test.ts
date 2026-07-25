@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { generateKey } from "../src/crypto/index.ts";
+import { DEFAULT_SCRYPT, generateKey } from "../src/crypto/index.ts";
 import { AuthError, VaultError } from "../src/errors.ts";
 import {
   changePassword,
@@ -80,5 +80,29 @@ describe("改主密码", () => {
   test("改密时当前密码错误 → AuthError", async () => {
     const { vault } = await newVault("old-pass");
     await expect(changePassword(vault, "bad", "new-pass", FAST)).rejects.toThrow(AuthError);
+  });
+});
+
+describe("E-3 · scrypt 参数提升的向前兼容", () => {
+  // v1.0.0 时代用 N=2^15 创建的 vault：DEFAULT_SCRYPT 提升后，老 vault 必须仍能用自己
+  // 存的 kdf 参数解锁——unlockWithPassword 用 vault.kdf 派生，不能落回当前 DEFAULT_SCRYPT。
+  const LEGACY_V1_0_0 = { algo: "scrypt", N: 1 << 15, r: 8, p: 1, keylen: 32 } as const;
+
+  test("旧参数（N=2^15，v1.0.0 默认档）创建的 vault 仍能用主密码解锁", async () => {
+    const { vault } = await createVault("legacy-pass", {
+      createdAt: CREATED,
+      params: LEGACY_V1_0_0,
+    });
+    expect(vault.kdf.N).toBe(1 << 15);
+    const mk = await unlockWithPassword(vault, "legacy-pass");
+    expect(mk.length).toBe(32);
+  });
+
+  test("新建 vault（不传 params）使用当前默认，kdf.N 为 2^17", async () => {
+    const { vault } = await createVault("new-pass", { createdAt: CREATED });
+    expect(vault.kdf.N).toBe(1 << 17);
+    expect(vault.kdf.N).toBe(DEFAULT_SCRYPT.N);
+    const mk = await unlockWithPassword(vault, "new-pass");
+    expect(mk.length).toBe(32);
   });
 });

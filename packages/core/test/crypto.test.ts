@@ -178,4 +178,16 @@ describe("KDF (scrypt) + 密钥包裹", () => {
     const k = await deriveKey("pw", salt, { ...DEFAULT_SCRYPT, N: 1 << 16 });
     expect(k.length).toBe(KEY_BYTES);
   });
+
+  // E-3：vault 上云后，云服务商直接持有密文、可离线无限次爆破主密码（无频率限制）。
+  // 2^15（交互式登录档）对"文件不出设备"场景合理，但不足以抵御离线爆破，须提到 2^17（128 MiB）。
+  test("DEFAULT_SCRYPT.N 已提升至 2^17（应对云端离线爆破的威胁模型）", () => {
+    expect(DEFAULT_SCRYPT.N).toBe(1 << 17);
+  });
+
+  test("新参数下仍可正常派生密钥，且 maxmem 留有余量不因 N 提升而触顶", async () => {
+    const salt = generateSalt();
+    const k = await deriveKey("pw", salt, DEFAULT_SCRYPT);
+    expect(k.length).toBe(KEY_BYTES);
+  });
 });

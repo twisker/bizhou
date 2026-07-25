@@ -25,12 +25,14 @@ import {
   cmdPreview,
   cmdPull,
   cmdPush,
+  cmdQuota,
   cmdRecover,
   cmdRename,
   cmdRm,
   cmdShare,
   cmdTrash,
   cmdUnlock,
+  cmdVault,
   createRuntime,
 } from "./commands.ts";
 import { cmdComplete, cmdCompletion } from "./completion.ts";
@@ -42,15 +44,19 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
 用法: bz <命令> [参数] [选项]
 
 密钥与会话:
-  init                     首次设置主密码，生成恢复密钥
-  unlock [--ttl <秒>]      输入主密码解锁本设备会话（缓存主密钥）
+  init [--no-cloud-vault]  首次设置主密码，生成恢复密钥；默认把保险库加密上云（换机恢复的前提）
+  unlock [--ttl <秒>]      输入主密码解锁本设备会话（缓存主密钥）；本机无保险库时自动从云端取回
   lock                     立即上锁（清除缓存主密钥）
-  passwd                   修改主密码（恢复密钥不变）
+  passwd                   修改主密码（恢复密钥不变；云端副本同步更新）
   recover                  用恢复密钥重设主密码
+  vault sync               把本机保险库加密上云（存量用户的升级入口）
+  vault status             查看本机 / 云端保险库状态
+  vault recovery-key [--rotate]   重新导出恢复密钥（须重输主密码）；--rotate 换一串新的、旧的作废
 
 账号:
   login [--name <n>] [--device] [--port <p>]   OAuth 登录百度
   logout                                       注销当前账号
+  quota                                        查看网盘总量 / 已用
   account [list|use <n>|add <n>]               多账号管理
 
 资源:
@@ -84,6 +90,10 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
   --password-stdin         从 stdin 读主密码（脚本化）
   -h, --help               显示帮助
   -v, --version            显示版本
+
+换机恢复: 新机器上 bz login 后 bz unlock 会自动取回云端保险库，无需搬运任何文件。
+          v1.0.x 升级上来的用户跑一次 bz vault sync（或直接 unlock，会顺带补传）。
+          注意 init / vault sync 会拦截强度不足的主密码——上云后主密码是唯一的安全边界。
 
 凭证: 在项目 .env 配置 BAIDU_APP_KEY / BAIDU_SECRET_KEY（见 .env.example）。`;
 
@@ -123,6 +133,8 @@ async function main(argv: string[]): Promise<number> {
       "7z": { type: "boolean" },
       ttl: { type: "string" },
       force: { type: "boolean" },
+      "no-cloud-vault": { type: "boolean" },
+      rotate: { type: "boolean" },
       recursive: { type: "boolean", short: "r" },
       to: { type: "string" },
       yes: { type: "boolean" },
@@ -148,7 +160,11 @@ async function main(argv: string[]): Promise<number> {
 
   switch (cmd) {
     case "init":
-      await cmdInit(rt, { ...common, force: Boolean(values.force) });
+      await cmdInit(rt, {
+        ...common,
+        force: Boolean(values.force),
+        noCloudVault: Boolean(values["no-cloud-vault"]),
+      });
       return 0;
     case "unlock":
       await cmdUnlock(rt, { ...common, ttl: values.ttl ? Number(values.ttl) : undefined });
@@ -160,7 +176,10 @@ async function main(argv: string[]): Promise<number> {
       await cmdPasswd(rt, common);
       return 0;
     case "recover":
-      await cmdRecover(rt);
+      await cmdRecover(rt, common);
+      return 0;
+    case "vault":
+      await cmdVault(rt, positionals[1], { ...common, rotate: Boolean(values.rotate) });
       return 0;
     case "login":
       await cmdLogin(rt, {
@@ -171,6 +190,9 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     case "logout":
       await cmdLogout(rt);
+      return 0;
+    case "quota":
+      await cmdQuota(rt, common);
       return 0;
     case "account":
       await cmdAccount(rt, positionals[1], positionals[2]);

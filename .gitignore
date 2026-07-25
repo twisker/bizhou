@@ -20,6 +20,7 @@ __pycache__/
 # --- 环境与密钥（安全红线：绝不入库） ---
 .env
 .env.*
+.npmrc
 !.env.example
 *.local
 # 百度凭证 / OAuth token / 主密码 / 恢复密钥 —— 任何本地机密文件

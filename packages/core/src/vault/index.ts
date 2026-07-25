@@ -45,6 +45,16 @@ export interface VaultFile {
   readonly wrappedMkByPassword: string;
   /** MK 被恢复密钥包裹（base64 blob）。 */
   readonly wrappedMkByRecovery: string;
+  /**
+   * 恢复密钥原始字节被 MK 包裹（base64 blob）。v1.1.0 新增，**可选**：
+   * v1.0.x 建的 vault 没有这一份，只能轮换出一串新的（见 rotateRecoveryKey）。
+   *
+   * 安全权衡（E-5）：有了它，任何能解出 MK 的人都能重新导出恢复密钥，而恢复密钥是
+   * 一张改主密码也撤销不掉的长期通行证。因此调用方**必须**在导出入口强制重输主密码，
+   * 不得仅凭"会话已解锁"放行——否则它就成了绕过改密的持久后门。与 1Password 的
+   * Emergency Kit 同款取舍：换来的是"密钥纸条丢了还能再打印一张"。
+   */
+  readonly wrappedRecoveryByMk?: string;
   /** 固定标记被 MK 加密，用于校验解锁得到的 MK 正确。 */
   readonly mkCheck: string;
   readonly createdAt: string;
@@ -98,10 +108,61 @@ export async function createVault(
     pwSalt: pwSalt.toString("base64"),
     wrappedMkByPassword: wrapKey(kekPw, mk),
     wrappedMkByRecovery: wrapKey(recoveryRaw, mk),
+    wrappedRecoveryByMk: wrapKey(mk, recoveryRaw),
     mkCheck: makeMkCheck(mk),
     createdAt: opts.createdAt,
   };
   return { vault, recoveryKey };
+}
+
+/** 这份 vault 能否重新导出原来那串恢复密钥（v1.0.x 建的 vault 不能）。 */
+export function hasExportableRecoveryKey(vault: VaultFile): boolean {
+  return typeof vault.wrappedRecoveryByMk === "string" && vault.wrappedRecoveryByMk.length > 0;
+}
+
+/**
+ * 重新导出**同一串**恢复密钥（E-5）。
+ *
+ * ⚠️ 调用方必须在入口强制重输主密码：本函数只要 MK，而 MK 可能来自一个已解锁的会话；
+ * 若仅凭会话放行，拿到解锁设备的人就能取走一张改密也撤销不掉的长期通行证。
+ */
+export function exportRecoveryKey(vault: VaultFile, mk: Buffer): string {
+  if (!hasExportableRecoveryKey(vault)) {
+    throw new VaultError(
+      "该保险库创建于 v1.1.0 之前，没有保存可重导出的恢复密钥副本。" +
+        "只能轮换出一串新的（旧密钥随即作废）。",
+    );
+  }
+  let raw: Buffer;
+  try {
+    raw = unwrapKey(mk, vault.wrappedRecoveryByMk as string);
+  } catch (cause) {
+    throw new VaultError("无法导出恢复密钥：主密钥不正确或 vault 已损坏", { cause });
+  }
+  return groupBase32(base32Encode(raw));
+}
+
+/**
+ * 轮换恢复密钥：生成一串新的并重裹 MK，**旧恢复密钥立即失效**。
+ * MK 与主密码都不受影响，因此已上传的资源不受任何影响。
+ * 主要用于 v1.0.x 老 vault（无法重导出）以及"恢复密钥可能泄露"的场景。
+ */
+export function rotateRecoveryKey(
+  vault: VaultFile,
+  mk: Buffer,
+): { vault: VaultFile; recoveryKey: string } {
+  // 先验明 MK。轮换会重写 wrappedMkByRecovery——用错 MK 覆盖一次，旧恢复密钥作废、
+  // 新恢复密钥解出的又是错的 MK，这个备用入口就永久废了。
+  verifyMk(vault, mk);
+  const recoveryRaw = generateKey();
+  return {
+    vault: {
+      ...vault,
+      wrappedMkByRecovery: wrapKey(recoveryRaw, mk),
+      wrappedRecoveryByMk: wrapKey(mk, recoveryRaw),
+    },
+    recoveryKey: groupBase32(base32Encode(recoveryRaw)),
+  };
 }
 
 /** 用主密码解锁，返回 MK。密码错误因 GCM tag 失败抛 AuthError。 */
@@ -168,3 +229,11 @@ export function wrapDek(mk: Buffer, dek: Buffer): string {
 export function unwrapDek(mk: Buffer, wrapped: string): Buffer {
   return unwrapKey(mk, wrapped);
 }
+
+export { CLOUD_VAULT_PATH, fetchCloudVault, putCloudVault, removeCloudVault } from "./cloud.ts";
+export {
+  assessPasswordStrength,
+  MIN_PASSWORD_BITS,
+  MIN_PASSWORD_LENGTH,
+  type PasswordStrength,
+} from "./strength.ts";

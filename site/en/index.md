@@ -24,6 +24,7 @@ permalink: /en/
 - [**Sharing & shell completion**](./guide-share-completion.html) — share codes / 7z-AES export; bash/zsh/PowerShell completion.
 - [**Security model**](./security.html) — algorithms, key hierarchy, threat model, privacy boundaries.
 - [**FAQ**](./faq.html)
+- [**Versions & compatibility**](./versions.html) — per-release changes, the compatibility promise, older downloads, and why there is no auto-update.
 
 ## Capabilities at a glance
 

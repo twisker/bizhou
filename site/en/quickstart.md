@@ -13,7 +13,9 @@ Assuming you've [installed](./install.html) `bz` and have your Baidu credentials
 ```bash
 bz init      # set the master password, generate a recovery key
 ```
-> **Write down the recovery key and store it offline** — it's the only fallback if you forget your master password.
+> **Write down the recovery key and store it offline** — it's the only fallback if you forget your master password. Forgot to? `bz vault recovery-key` re-exports the same one (master password required).
+
+`bz init` **refuses weak master passwords**; use a passphrase of four or five unrelated words (stronger *and* easier to remember). Why: an encrypted copy of your vault is stored in your netdisk, which lets the provider brute-force it offline, making password strength the only remaining boundary — what you get in return is the new-machine recovery in step 5. To opt out, add `--no-cloud-vault` (at the cost of permanent lockout when you change machines).
 
 ## 2. Log in to Baidu
 
@@ -50,14 +52,31 @@ bz mv /work/2026 /archive                 # the cloud is real folders too: mv/cp
 bz rm <resourceID>                        # delete to the recycle bin (managed via bz trash)
 ```
 
-## 5. Idempotency, resume, concurrency (automatic, worry-free)
+## 5. New machine / reinstall: just your master password
+
+Nothing to carry over:
+
+```bash
+bz login      # sign in to the same Baidu account
+bz unlock     # enter your master password — the vault is fetched automatically
+bz ls         # everything is there
+```
+
+Upgrading from v1.0.x? Back-fill the cloud copy once:
+
+```bash
+bz vault sync     # verifies your password, checks strength, then uploads
+bz vault status   # check local / cloud state any time
+```
+
+## 6. Idempotency, resume, concurrency (automatic, worry-free)
 
 - **Push the same file again** → content dedup finds it already exists and **skips** it — no duplicates.
 - **Interrupted mid-transfer** → just **re-run the same command** to resume (same key & uploaded chunks reused; downloads use a temp file with atomic landing + end-to-end verification on completion).
 - **Want it faster** → `bz push bigfile --concurrency 8` (default 4, range 1–16).
 - **Force** → `--force` bypasses dedup/in-flight-lock.
 
-## 6. Automatic backup (optional)
+## 7. Automatic backup (optional)
 
 ```bash
 bz backup add ~/important-dir    # register a backup job
@@ -65,7 +84,7 @@ bz daemon                        # foreground: back up on change + periodic swee
 ```
 See [Backup & daemon](./guide-backup.html).
 
-## 7. Shell completion (optional)
+## 8. Shell completion (optional)
 
 ```bash
 eval "$(bz completion bash)"     # bash (zsh / powershell in the completion guide)

@@ -56,3 +56,19 @@ export class InvalidArgError extends BizhouError {
     super("INVALID_ARG", message, options);
   }
 }
+
+/**
+ * 百度文件 API 返回非 0 errno 时抛出的结构化错误：保留原始 errno（而不是只塞进
+ * message 字符串），供调用方按 errno 精确区分"确定不存在"与"请求失败"——
+ * 例如 BaiduBackend.findBlobEntry 需要用它来判断 list 失败到底是"目录真的不存在"
+ * 还是网络/鉴权/限流等瞬时问题（见该处注释）。
+ */
+export class BaiduApiError extends BizhouError {
+  constructor(
+    readonly errno: number,
+    message: string,
+    options?: { cause?: unknown },
+  ) {
+    super("BAIDU", message, options);
+  }
+}

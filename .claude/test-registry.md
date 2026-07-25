@@ -4,14 +4,22 @@
 
 ---
 
-## 当前测试结果（2026-07-24）
+## 当前测试结果（2026-07-25，v1.1.0 云端保险库）
 
-- `bun test`：**180 项全绿 + 1 skip**（29 文件），`pnpm run typecheck` 双包通过，`biome check` 无 error。
+- `bun test`：**303 项全绿 + 1 skip**（45 文件），`pnpm run typecheck` 双包通过，`biome check` 无 error。
+- **v1.1.0 新增覆盖**：
+  - `vault-cloud.test.ts`（core）：putCloudVault→fetchCloudVault 往返等价；换机语义（只凭云端 vault + 主密码解出同一 MK）；云端没有→null；**损坏/字段残缺→抛 VaultError 而非 null**（这条守着"老用户被误判为新用户 → init 铸新 MK → 数据永久锁死"的链路）；保险库与同名目录都不出现在 listDir；覆盖写；不透明命名不含产品名指纹。
+  - `password-strength.test.ts`（core）：四词短语/混合 16 位达标；过短、空、单字符重复、常见弱口令基底、纯数字、含产品名一律不达标；熵估算随长度单调不减；理由不回显密码。
+  - `recovery-export.test.ts`（core）：重导出得到**同一串**且真能解锁；改密后仍可导出；错 MK 拒绝；v1.0.x 老 vault（无 wrappedRecoveryByMk）导出抛错、可 rotate；**rotate 前先 verifyMk**（否则用错 MK 覆盖备用入口即永久废掉）；vault 内无明文恢复密钥。
+  - `backend.baidu-trash.test.ts`（core，新增带目录语义的假网盘夹具 `helpers/fake-netdisk.ts`）：移入 .trash / 列出（含原路径与删除时间）/ 还原（父目录已删也能重建）/ 单条删 / 清空 / 空回收站不抛 / listDir 排除 .trash / entryId 穿越拒绝 / 不存在条目报错；回归防护：trashPath 不再发原生 opera=delete。
+  - `quota.test.ts`（core）：total/used 正确；打到 /api/quota 且带 token；errno 与字段缺失一律抛错，**绝不返回 0**。
+  - `vault-cloud-cmd.test.ts`（cli，`--local` 当云端）：init 后云端有且与本地一致；弱密码被拦下且不留半初始化状态；`--no-cloud-vault` 放行但只留本地；换机 unlock 自动取回并解出同一 MK；**云端损坏时 unlock 报错、绝不当新用户放行**；改密/恢复后云端同步更新；改密弱新密码被拒且云端不被改坏；vault sync 的强度/口令/未登录三条拒绝路径；unlock 顺带补传（弱密码则坚决不传）；vault status 无需主密码。
+  - `vault-recovery-cmd.test.ts`（cli）：重导出的就是 init 那串；**会话已解锁也必须重输主密码**；老 vault 提示 --rotate；--rotate 后新密钥可解、旧的作废、本地与云端一起更新；口令错时不改动任何东西。
 - **D1（daemon/定时备份）新增覆盖**：`backup-cmd.test.ts`（`bz backup add/list/rm` 端到端，非目录/未知任务失败路径）、`sweep.test.ts`（`sweepJob` 幂等 walk+`pushOneFile`：首轮上传→二轮全跳过→改动文件只重传改动项→源目录不存在时安全跳过不抛）、`watcher.test.ts`（`debounce`/`listDirsRecursive` 纯逻辑；`watchRecursive` 真实 fs.watch 事件触发 + `stop()` 后不再触发）、`serial-runner.test.ts`（`SerialJobRunner`：空闲 `trigger()` 立即跑一次；运行中的多次 `trigger()` 合并为一次补跑且 `maxConcurrent===1`）。`sweepJob`/`cmdBackup`/`SerialJobRunner` 均离线（内存后端/本地临时目录），不联网。
 - **S1-T5 新增覆盖**（`packages/cli/test/push-idempotency.test.ts`，内存后端/内存 vault，不联网）：同内容第二次 push → `skipped-dup` 且不新增 bundle；`--force` 绕过去重仍上传（新增 bundle）；预置存活在飞锁（pid=当前进程）→ `locked` 且不上传；预置崩溃残留日志（stale pid + doneChunks=[0]）→ `resumed`，复用原 bundleId 且 `skipExisting` 令 seq 0 不再 `putChunk`。另手工验证（未入自动化套件）：分片中途抛错时 journal 保留且 `doneChunks` 只含已完成的分片（`onProgress`→`appendDoneChunk` 串行队列在 `packResource` 失败路径下仍正确落盘）。
 - **v2-Phase 2 新增覆盖**：上传/下载映射纯函数（含 name basename 净化 + `..` 拒绝）、push 缺省镜像 / pull 落文件根、`push -r`/`pull -r` 整树往返字节一致、pull `--out` 恶意 meta.name 穿越被挡。
 - **v2-Phase 3 新增覆盖**：filemanager move/copy/rename（mock）、Backend 目录级操作（本地 fs）、renameResource（改名后分片/wrappedKey 不变、pull 字节一致）、CLI mv/cp/rename 端到端 + rename newName 穿越拒绝。
-- **v2-Phase 4 新增覆盖**：LocalBackend `.trash/` 回收站往返（trash→list→restore→clear，listDir 忽略 .trash）、BaiduBackend 原生 delete + 管理方法抛"去 App"、CLI rm→回收站（目录需 --yes）+ trash 命令。
+- **v2-Phase 4 新增覆盖**：LocalBackend `.trash/` 回收站往返（trash→list→restore→clear，listDir 忽略 .trash）、CLI rm→回收站（目录需 --yes）+ trash 命令。（BaiduBackend 原「原生 delete + 管理方法抛『去 App』」已被 v1.1.0 的 .trash 方案取代，见上。）
 - 测试文件：core `{crypto,base32,vault,bundle,resource,baidu,account,preview,baidu.live,config,cloudpath,backend.local,backend.baidu}.test.ts` + cli `{cli,fs}.test.ts`（baidu.live 需 `BIZHOU_LIVE=1`+token，默认 skip；cli.test 的 7z 测试无 7z 时 skip）。
 - **v2-Phase 1 新增覆盖**：config 双根解析、cloudpath 纯函数（含 `..` 拒绝防穿越）、Backend/LocalBackend/BaiduBackend（mkdir/listDir/bundleStore）、CLI `bz mkdir`/`ls -r`/`push --to` 离线端到端。
 - 关键覆盖：AES-GCM 往返 + 篡改/错密钥/AAD 失败、KDF/信封、vault 双路解锁 + 改密、manifest 严格校验、**资源 pack→unpack 字节级往返**（单/多片/整除/空/gzip/3MB/内存 store）、篡改分片与错 MK 被拒、百度上传编排（partseq/md5/断点续传/errno）+ 模拟网盘端到端、多账号 + 设备密钥加密落盘、预览加密往返。

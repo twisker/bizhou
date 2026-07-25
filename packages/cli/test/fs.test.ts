@@ -29,7 +29,7 @@ beforeAll(async () => {
   work = await mkdtemp(join(tmpdir(), "bizhou-fs-"));
   store = join(work, "store");
   process.env.BIZHOU_HOME = join(work, "home");
-  process.env.BIZHOU_MASTER_PASSWORD = "fs-pass";
+  process.env.BIZHOU_MASTER_PASSWORD = "fs-test lantern gravel windows"; // 需过 v1.1.0 上云强度关卡
 });
 afterAll(async () => {
   await rm(work, { recursive: true, force: true });

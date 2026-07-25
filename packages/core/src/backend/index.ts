@@ -36,7 +36,19 @@ export interface Backend {
   deleteTrash(entryId: string): Promise<void>;
   /** 清空回收站。 */
   clearTrash(): Promise<void>;
+
+  /**
+   * 通用 blob 原语：写任意字节到 cloudPath（覆盖写）。
+   * 与 bundleStore 无关——不经分片/manifest，供"整份密文信封"类文件使用（如云端保险库）。
+   * 注意：云端文件名不是安全边界，引擎开源、命名规则对手可读；保密性只来自内容本身已加密。
+   */
+  putBlob(cloudPath: string, data: Buffer): Promise<void>;
+  /** 读 cloudPath 的字节；路径不存在返回 null（而非抛错），genuine IO 失败仍抛错。 */
+  getBlob(cloudPath: string): Promise<Buffer | null>;
+  /** 删 cloudPath；路径本就不存在时是幂等操作，不抛错。 */
+  removeBlob(cloudPath: string): Promise<void>;
 }
 
 export { BaiduBackend } from "./baidu.ts";
 export { LocalBackend } from "./local.ts";
+export { CLOUD_VAULT_NAME, RESERVED_ROOT_NAMES, TRASH_DIR } from "./reserved.ts";

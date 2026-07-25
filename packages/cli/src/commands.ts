@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import {
   appendDoneChunk,
+  assessPasswordStrength,
   type Backend,
   BizhouError,
   BUNDLE_SUFFIX,
@@ -24,11 +25,14 @@ import {
   deriveKey,
   downloadLocalPath,
   exchangeCodeForToken,
+  exportRecoveryKey,
+  fetchCloudVault,
   generateBundleId,
   generateKey,
   generateSalt,
   getCachedManifest,
   groupBase32,
+  hasExportableRecoveryKey,
   hashPlaintextFile,
   invalidateManifest,
   isLockAlive,
@@ -42,15 +46,18 @@ import {
   parseManifest,
   pollDeviceToken,
   putCachedManifest,
+  putCloudVault,
   readJournal,
   readResourceMeta,
   removeJournal,
   renameResource,
+  rotateRecoveryKey,
   startDeviceFlow,
   unlockWithPassword,
   unlockWithRecovery,
   unpackResource,
   unwrapDek,
+  type VaultFile,
   wrapDek,
   wrapKey,
   writeJournal,
@@ -59,11 +66,116 @@ import { findSevenZip, sevenZipArchive } from "./export7z.ts";
 import { generatePreview } from "./preview.ts";
 import { readLineFromStdin, readPassword, resolveMasterPassword } from "./prompt.ts";
 import { c, endProgress, formatBytes, info, ok, out, renderProgress, warn } from "./render.ts";
-import { createRuntime, makeBackend, type Runtime } from "./runtime.ts";
+import {
+  backendIfPossible,
+  baiduClientForCurrent,
+  createRuntime,
+  makeBackend,
+  type Runtime,
+} from "./runtime.ts";
 
 export interface CommonOpts {
   local?: string;
   passwordStdin?: boolean;
+}
+
+// ---- 云端保险库（换机恢复的前提）------------------------------------------
+
+/**
+ * 上云路径上的**硬关卡**：主密码不够强，就不把保险库放到别人的机器上。
+ *
+ * 为什么不能只是一句黄色提示：保险库上云后云服务商直接持有这份密文，可以离线、
+ * 无频率限制地爆破，主密码强度成为唯一的安全边界。这里放行一次，用户不会有任何
+ * 感知，代价却由他将来独自承担。所以宁可挡住，并给出可执行的改法。
+ */
+function assertStrongEnough(password: string, context: string): void {
+  const s = assessPasswordStrength(password);
+  if (s.ok) return;
+  throw new BizhouError(
+    "INVALID_ARG",
+    [
+      `${context}：主密码强度不足，不能把保险库加密上云。`,
+      ...s.reasons.map((r) => `  · ${r}`),
+      "",
+      "为什么是硬性要求：上云后云服务商持有这份密文，可离线无限次爆破——主密码强度是唯一的安全边界。",
+      "改用四五个不相干的词组成的长短语最省力；若坚持只在本机保存保险库，",
+      "可用 `bz init --no-cloud-vault`（代价：换机 / 重装 / 硬盘损坏后数据永久锁死）。",
+    ].join("\n"),
+  );
+}
+
+/**
+ * 把保险库上传云端。上传失败（含未登录）不抛错——本地的改动已经生效，此时中断
+ * 只会让用户以为整件事失败了；但**必须明确告警**，因为"云端副本是旧的"会在换机时
+ * 变成一个难以自查的坑。绝不静默。
+ */
+async function pushVaultToCloud(rt: Runtime, vault: VaultFile, opts: CommonOpts): Promise<boolean> {
+  try {
+    const backend = await backendIfPossible(rt, opts.local);
+    if (!backend) {
+      warn(
+        "尚未登录网盘，保险库还没有上云。换机恢复依赖它——请 `bz login` 后运行 `bz vault sync` 补上。",
+      );
+      return false;
+    }
+    await putCloudVault(backend, vault);
+    ok("保险库加密副本已上云。");
+    return true;
+  } catch (err) {
+    warn(
+      `保险库上云失败：${err instanceof Error ? err.message : String(err)}\n` +
+        "本地改动已生效，但云端副本仍是旧的——请稍后运行 `bz vault sync` 重试，否则换机时会拿到旧密文。",
+    );
+    return false;
+  }
+}
+
+/** 云端当前是否已有保险库；无法判断（未登录/网络失败）时返回 undefined。 */
+async function cloudVaultPresent(rt: Runtime, opts: CommonOpts): Promise<boolean | undefined> {
+  try {
+    const backend = await backendIfPossible(rt, opts.local);
+    if (!backend) return undefined;
+    return (await fetchCloudVault(backend)) !== null;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 存量用户的顺带升级：解锁时若云端还没有保险库，就用刚输入的主密码做一次强度判定，
+ * 达标即补传。不达标只提示、绝不上传——"在用户不知情中把弱密码暴露给云端"正是本次
+ * 发版要避免的降级。任何失败都只告警，不能让 unlock 本身失败。
+ */
+async function backfillCloudVault(
+  rt: Runtime,
+  vault: VaultFile,
+  password: string,
+  opts: CommonOpts,
+): Promise<void> {
+  try {
+    const backend = await backendIfPossible(rt, opts.local);
+    if (!backend) return;
+    if ((await fetchCloudVault(backend)) !== null) return;
+
+    const s = assessPasswordStrength(password);
+    if (!s.ok) {
+      warn(
+        [
+          "本机的保险库还没有上云，因此换机 / 重装后将无法恢复数据。",
+          "现在没有自动上云，是因为主密码强度不足以对抗云端离线爆破：",
+          ...s.reasons.map((r) => `  · ${r}`),
+          "请先 `bz passwd` 换一个更长的多词短语，再运行 `bz vault sync`。",
+        ].join("\n"),
+      );
+      return;
+    }
+    await putCloudVault(backend, vault);
+    info("已把保险库加密副本补传到云端（换机只需重输主密码即可取回全部数据）。");
+  } catch (err) {
+    warn(
+      `保险库补传云端失败（不影响本次解锁）：${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 export function parseSize(s: string): number {
@@ -87,7 +199,10 @@ const SHARE_PREFIX = "BZK1-";
 
 // ---- init / unlock / lock / passwd ---------------------------------------
 
-export async function cmdInit(rt: Runtime, opts: CommonOpts & { force?: boolean }): Promise<void> {
+export async function cmdInit(
+  rt: Runtime,
+  opts: CommonOpts & { force?: boolean; noCloudVault?: boolean },
+): Promise<{ recoveryKey: string }> {
   if (rt.vaultExists() && !opts.force) {
     throw new BizhouError(
       "VAULT",
@@ -102,23 +217,43 @@ export async function cmdInit(rt: Runtime, opts: CommonOpts & { force?: boolean 
     const pw2 = await readPassword("再次输入确认: ");
     if (pw !== pw2) throw new BizhouError("INVALID_ARG", "两次输入不一致");
   }
+  // 强度关卡在建库之前：不达标就整件事不发生，不留下半初始化的状态。
+  if (!opts.noCloudVault) assertStrongEnough(pw, "bz init");
+
   const { vault, recoveryKey } = await createVault(pw, { createdAt: new Date().toISOString() });
   await rt.saveVault(vault);
   ok(`已初始化 vault：${rt.paths.vault}`);
+
+  // 恢复密钥先于上云打印：上云可能因未登录/网络失败，绝不能让它挡住这段"只显示一次"的输出。
   info("");
   warn("以下是你的恢复密钥，只显示这一次，请离线妥善保管（忘记主密码时用它恢复）：");
   out(c.bold(recoveryKey));
   info("");
   warn("任何人拿到恢复密钥即可解开你的数据 —— 切勿上传、截图或存入云端。");
+
+  if (opts.noCloudVault) {
+    warn(
+      [
+        "已按 --no-cloud-vault 跳过保险库上云。",
+        `此时 ${rt.paths.vault} 是解开你全部数据的唯一钥匙：换机、重装、硬盘损坏都会让云端数据永久锁死。`,
+        "请自行离线备份该文件与上面的恢复密钥；日后想改主意，运行 `bz vault sync`。",
+      ].join("\n"),
+    );
+  } else {
+    await pushVaultToCloud(rt, vault, opts);
+  }
+  return { recoveryKey };
 }
 
 export async function cmdUnlock(rt: Runtime, opts: CommonOpts & { ttl?: number }): Promise<void> {
-  const vault = await rt.loadVault();
+  const vault = await rt.loadVault({ local: opts.local }); // 本地没有则自动从云端取回（换机）
   const pw = await resolveMasterPassword("主密码: ", opts);
   const mk = await unlockWithPassword(vault, pw);
   const ttlSec = opts.ttl ?? Number(process.env.BIZHOU_UNLOCK_TTL ?? 8 * 3600);
   await rt.accounts.cacheMk(mk, Date.now() + ttlSec * 1000);
   ok(`已解锁本设备会话（${Math.round(ttlSec / 3600)} 小时后自动上锁）`);
+  // 解锁是少数几个手上有明文主密码的时机，顺带把存量用户的保险库补传上云。
+  await backfillCloudVault(rt, vault, pw, opts);
 }
 
 export async function cmdLock(rt: Runtime): Promise<void> {
@@ -126,33 +261,182 @@ export async function cmdLock(rt: Runtime): Promise<void> {
   ok("已上锁（清除缓存主密钥）");
 }
 
-export async function cmdPasswd(rt: Runtime, opts: CommonOpts): Promise<void> {
-  const vault = await rt.loadVault();
-  const cur = await resolveMasterPassword("当前主密码: ", opts);
-  const next = await readPassword("新主密码: ");
-  const confirm = await readPassword("再次输入新主密码: ");
-  if (next !== confirm) throw new BizhouError("INVALID_ARG", "两次输入不一致");
-  const v2 = await changePassword(vault, cur, next);
+/**
+ * 改主密码的实现体（不含交互，供 `bz passwd` 与测试共用）。
+ *
+ * 新密码的强度关卡只在"保险库已经在云端"时是硬性的：那时弱密码等于把云端密文的
+ * 唯一防线降级。若保险库只在本机（或此刻判断不出来），弱密码只警告不拦——不能因为
+ * 一个新策略把纯本地用户挡在改密门外。
+ */
+export async function changeMasterPassword(
+  rt: Runtime,
+  opts: CommonOpts & { current: string; next: string },
+): Promise<void> {
+  const vault = await rt.loadVault({ local: opts.local });
+  const onCloud = await cloudVaultPresent(rt, opts);
+  if (onCloud === true) assertStrongEnough(opts.next, "bz passwd");
+
+  const v2 = await changePassword(vault, opts.current, opts.next);
   await rt.saveVault(v2);
   await rt.accounts.clearMk();
   ok("主密码已更新（恢复密钥不变；已上锁，请重新 unlock）");
+
+  // 云端副本必须跟着换，否则换机时取回的是旧密文、只认旧密码。
+  if (onCloud === true) await pushVaultToCloud(rt, v2, opts);
+  else if (onCloud === false) {
+    const s = assessPasswordStrength(opts.next);
+    if (s.ok) await pushVaultToCloud(rt, v2, opts);
+    else warn("保险库仍未上云（新主密码强度不足以对抗云端离线爆破）；换机将无法恢复数据。");
+  }
 }
 
-export async function cmdRecover(rt: Runtime): Promise<void> {
-  const vault = await rt.loadVault();
-  info("用恢复密钥验证并重设主密码。");
-  const rk = (await readPassword("恢复密钥: ")).trim();
-  const mk = await unlockWithRecovery(vault, rk); // 验证恢复密钥并解出 MK
+export async function cmdPasswd(rt: Runtime, opts: CommonOpts): Promise<void> {
+  const current = await resolveMasterPassword("当前主密码: ", opts);
   const next = await readPassword("新主密码: ");
   const confirm = await readPassword("再次输入新主密码: ");
   if (next !== confirm) throw new BizhouError("INVALID_ARG", "两次输入不一致");
+  await changeMasterPassword(rt, { ...opts, current, next });
+}
+
+/** 用恢复密钥重设主密码的实现体（不含交互，供 `bz recover` 与测试共用）。 */
+export async function recoverWithKey(
+  rt: Runtime,
+  opts: CommonOpts & { recoveryKey: string; newPassword: string },
+): Promise<void> {
+  const vault = await rt.loadVault({ local: opts.local });
+  const mk = await unlockWithRecovery(vault, opts.recoveryKey); // 验证恢复密钥并解出 MK
+  const onCloud = await cloudVaultPresent(rt, opts);
+  if (onCloud === true) assertStrongEnough(opts.newPassword, "bz recover");
+
   // 用新主密码（新盐）重裹 MK，只替换 wrappedMkByPassword。
   const salt = generateSalt();
-  const kek = await deriveKey(next, salt, vault.kdf);
+  const kek = await deriveKey(opts.newPassword, salt, vault.kdf);
   const v2 = { ...vault, pwSalt: salt.toString("base64"), wrappedMkByPassword: wrapKey(kek, mk) };
   await rt.saveVault(v2);
   await rt.accounts.clearMk();
   ok("已用恢复密钥重设主密码。");
+
+  if (onCloud !== false || assessPasswordStrength(opts.newPassword).ok) {
+    await pushVaultToCloud(rt, v2, opts);
+  }
+}
+
+export async function cmdRecover(rt: Runtime, opts: CommonOpts = {}): Promise<void> {
+  info("用恢复密钥验证并重设主密码。");
+  const recoveryKey = (await readPassword("恢复密钥: ")).trim();
+  const newPassword = await readPassword("新主密码: ");
+  const confirm = await readPassword("再次输入新主密码: ");
+  if (newPassword !== confirm) throw new BizhouError("INVALID_ARG", "两次输入不一致");
+  await recoverWithKey(rt, { ...opts, recoveryKey, newPassword });
+}
+
+/** `bz vault <sync|status|recovery-key>`：保险库上云、状态查看、恢复密钥重导出。 */
+export async function cmdVault(
+  rt: Runtime,
+  sub: string | undefined,
+  opts: CommonOpts & { rotate?: boolean },
+): Promise<void> {
+  if (sub === "recovery-key") return cmdVaultRecoveryKey(rt, opts);
+
+  if (sub === "status") {
+    const localHas = rt.vaultExists();
+    info(`本机保险库：${localHas ? rt.paths.vault : "无"}`);
+    const backend = await backendIfPossible(rt, opts.local);
+    if (!backend) {
+      info("云端保险库：无法查询（尚未登录网盘）");
+      return;
+    }
+    const cloud = await fetchCloudVault(backend);
+    if (!cloud) {
+      info("云端保险库：无");
+      warn("换机 / 重装后将无法恢复数据。请运行 `bz vault sync` 把保险库加密上云。");
+      return;
+    }
+    const localVault = localHas ? await rt.loadVault({ local: opts.local }) : null;
+    const same = localVault !== null && JSON.stringify(localVault) === JSON.stringify(cloud);
+    info(`云端保险库：有（与本机${localVault === null ? "无从比对" : same ? "一致" : "不一致"}）`);
+    if (localVault !== null && !same) {
+      warn("本机与云端的保险库不一致：若刚改过主密码，请运行 `bz vault sync` 让云端跟上。");
+    }
+    return;
+  }
+
+  if (sub !== "sync") {
+    throw new BizhouError("INVALID_ARG", "用法：bz vault <sync|status|recovery-key>");
+  }
+
+  if (!rt.vaultExists()) {
+    throw new BizhouError("VAULT", "本机没有保险库可上传：请先 `bz init`");
+  }
+  const vault = await rt.loadVault({ local: opts.local });
+  // 强制重输主密码：既证明操作者是本人（而不是借用了已解锁会话的人），
+  // 也是唯一能在此刻对"这个密码够不够强"做出判断的时机。
+  const pw = await resolveMasterPassword("主密码: ", opts);
+  await unlockWithPassword(vault, pw); // 密码错误 → AuthError，不上传
+  assertStrongEnough(pw, "bz vault sync");
+
+  const backend = await backendIfPossible(rt, opts.local);
+  if (!backend) throw new BizhouError("VAULT", "尚未登录网盘：请先 `bz login`");
+  const existing = await fetchCloudVault(backend);
+  await putCloudVault(backend, vault);
+  ok(existing ? "云端保险库已更新。" : "保险库加密副本已上云。");
+  if (!existing) {
+    warn(
+      [
+        "请知悉这次变化：云端从此持有你的保险库密文，云服务商可以离线、无限次地尝试猜你的主密码。",
+        "换来的是换机恢复能力——新机器上只需登录网盘 + 输入主密码即可取回全部数据。",
+        "保持主密码足够长，这笔交易才划算。",
+      ].join("\n"),
+    );
+  }
+}
+
+/**
+ * `bz vault recovery-key [--rotate]`：重新导出恢复密钥（E-5）。
+ *
+ * **入口强制重输主密码**，即便本设备会话已解锁。原因：恢复密钥是一张改主密码也
+ * 撤销不掉的长期通行证；若"会话已解锁"就能取走它，任何一次借用了解锁设备的人都
+ * 拿到了永久后门，而改密这个补救动作对它无效。这一条是 E-5 能成立的前提，
+ * 不要为了顺手而放宽。
+ */
+async function cmdVaultRecoveryKey(
+  rt: Runtime,
+  opts: CommonOpts & { rotate?: boolean },
+): Promise<void> {
+  const vault = await rt.loadVault({ local: opts.local });
+  const pw = await resolveMasterPassword("主密码（导出恢复密钥须再次验证）: ", opts);
+  const mk = await unlockWithPassword(vault, pw); // 密码错误 → AuthError，什么都不改
+
+  if (opts.rotate) {
+    const { vault: v2, recoveryKey } = rotateRecoveryKey(vault, mk);
+    await rt.saveVault(v2);
+    warn("旧的恢复密钥已作废。以下是新的恢复密钥，只显示这一次，请离线妥善保管：");
+    out(c.bold(recoveryKey));
+    await pushVaultToCloud(rt, v2, opts); // 云端副本必须跟上，否则换机取回的只认已作废的旧密钥
+    return;
+  }
+
+  if (!hasExportableRecoveryKey(vault)) {
+    throw new BizhouError(
+      "VAULT",
+      [
+        "该保险库创建于 v1.1.0 之前，没有保存可重导出的恢复密钥副本。",
+        "可以用 `bz vault recovery-key --rotate` 换一串新的（旧密钥随即作废，已上传的资源不受影响）。",
+      ].join("\n"),
+    );
+  }
+  warn("以下是你的恢复密钥（与初始化时那串相同），请离线妥善保管：");
+  out(c.bold(exportRecoveryKey(vault, mk)));
+}
+
+/** `bz quota`：网盘总量 / 已用（E-7）。仅百度后端有配额概念。 */
+export async function cmdQuota(rt: Runtime, opts: CommonOpts): Promise<void> {
+  if (opts.local) {
+    throw new BizhouError("INVALID_ARG", "`--local` 后端没有配额概念（那是本地目录）");
+  }
+  const { total, used } = await (await baiduClientForCurrent(rt)).getQuota();
+  const pct = total > 0 ? ((used / total) * 100).toFixed(1) : "0.0";
+  out(`已用 ${formatBytes(used)} / 共 ${formatBytes(total)}（${pct}%）`);
 }
 
 // ---- login / logout / account --------------------------------------------

@@ -256,3 +256,27 @@
 
 > 进 homebrew-core / winget（待用户量）。worker_threads 已由 S1 澄清定型为上传并发。
 > （daemon→D1；shell 补全→C1；更多预览类型→P1。）
+
+---
+
+## v1.1.0 · 云端保险库与配套能力 ✅ **开发完成（2026-07-25，待人工发版）**
+
+> 来源：下游 `../bizhouzizhen`（自珍 GUI）产品设计规格 §7 提出的引擎需求清单 E-1~E-7。
+> 设计与计划：`docs/superpowers/plans/2026-07-25-v1.1.0-cloud-vault.md`
+> 主旨：让「换机只需重输主密码」这句话第一次真正成立，同时补齐回收站、配额、恢复密钥重导出。
+
+| 任务 | 需求 | 说明 | 状态 |
+|-----|------|------|------|
+| — | E-1 | 修正「换机只需重输主密码」的错误文档（v1.0.0 已发布，正在误导用户） | ✅ `c5f5863` |
+| T1 | E-2 前置 | Backend 通用 blob 原语 `putBlob`/`getBlob`/`removeBlob` | ✅ `dde7c20`+`de637d9` |
+| T2 | E-3 | scrypt `N` 2^15 → 2^17（参数存 vault 内，老 vault 向前兼容） | ✅ `ed3b97b` |
+| T3 | E-2 + E-4 | 云端保险库 `vault/cloud.ts` + 不透明命名 + listDir 过滤保留名 | ✅ `853855f` |
+| T4 | E-2 | CLI 接线：init 上云 / unlock 换机取回与补传 / passwd·recover 重传 / `bz vault sync·status` + 强度关卡 | ✅ `e6d96bb` |
+| T5 | E-5 | 恢复密钥重导出 + 轮换 + `bz vault recovery-key [--rotate]` | ✅ `ab9cf49` |
+| T6 | E-6 | BaiduBackend `.trash` 回收站（列出/还原/单条删/清空） | ✅ `108d6d3` |
+| T7 | E-7 | 网盘配额 `getQuota` + `bz quota` | ✅ `37f8656` |
+| T8 | — | 中英文档（README/faq/security/commands）+ `.claude/` 登记表 | ✅ `14cc696` |
+
+**验收（达成）：** `bun test` **303 全绿 + 1 skip**（45 文件）；typecheck 双包通过；biome 无 error。
+**关键决策留痕：** ①`fetchCloudVault` 严格区分「云端没有」与「取不到/损坏」——后者退化成 null 会让老用户在新机被误判为新用户、`bz init` 铸新 MK、云端数据永久锁死。②强度关卡做成拦截式而非提示，因为上云后主密码强度是唯一安全边界；`--no-cloud-vault` 是唯一绕过方式且必须显式告知代价。③`rotateRecoveryKey` 先 `verifyMk`，防止用错 MK 覆盖唯一备用入口。④配额失败抛错不回落 0。
+**待人工：** 发版（`scripts/bump-minor.sh` → 1.1.0 → npm publish）+ 真机联网验证（H-12 / H-13）。

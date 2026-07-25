@@ -15,6 +15,7 @@ import {
   type ConfigPaths,
   configPaths,
   FileSecretStore,
+  fetchCloudVault,
   type HttpClient,
   LocalBackend,
   type OAuthConfig,
@@ -25,6 +26,7 @@ import {
   type VaultFile,
 } from "@bizhou/core";
 import { resolveMasterPassword } from "./prompt.ts";
+import { info } from "./render.ts";
 
 /** 极简 .env 解析（无依赖）：KEY=value / KEY='value' / KEY="value"，# 注释与空行忽略。 */
 export function parseDotenv(text: string): Record<string, string> {
@@ -67,11 +69,15 @@ export interface Runtime {
   readonly daemonDebounceMs: number;
   now(): number;
   oauthConfig(): OAuthConfig;
-  loadVault(): Promise<VaultFile>;
+  /**
+   * 读保险库：本地优先；本地没有则去云端取（换机恢复）。
+   * `local` 指定后端目录（`--local`）；不给则用当前账号的网盘，未登录时不查云端。
+   */
+  loadVault(opts?: { local?: string }): Promise<VaultFile>;
   vaultExists(): boolean;
   saveVault(v: VaultFile): Promise<void>;
   /** 解析 MK：优先用已缓存（bz unlock 后），否则提示主密码并临时解锁。 */
-  resolveMk(opts?: { passwordStdin?: boolean }): Promise<Buffer>;
+  resolveMk(opts?: { passwordStdin?: boolean; local?: string }): Promise<Buffer>;
 }
 
 const httpAdapter: HttpClient = (url, init) =>
@@ -127,20 +133,34 @@ export function createRuntime(): Runtime {
       return { appKey, secretKey };
     },
     vaultExists: () => existsSync(paths.vault),
-    async loadVault(): Promise<VaultFile> {
-      if (!existsSync(paths.vault)) {
-        throw new VaultError("尚未初始化：请先运行 `bz init`");
+    async loadVault(opts: { local?: string } = {}): Promise<VaultFile> {
+      if (existsSync(paths.vault)) {
+        return JSON.parse(await readFile(paths.vault, "utf8")) as VaultFile;
       }
-      return JSON.parse(await readFile(paths.vault, "utf8")) as VaultFile;
+      // 本地没有 —— 很可能是换了新机器。v1.1.0 起 init 会把保险库加密上云，去取回来。
+      // fetchCloudVault 只在"云端确实没有"时返回 null；损坏或取不到都会抛错，
+      // 绝不会退化成"当作新用户"（那会让 bz init 铸造新 MK，锁死云端已有数据）。
+      const backend = await backendIfPossible(this, opts.local);
+      const cloud = backend ? await fetchCloudVault(backend) : null;
+      if (cloud) {
+        await this.saveVault(cloud);
+        info(`已从云端取回保险库 → ${paths.vault}`);
+        return cloud;
+      }
+      throw new VaultError(
+        backend
+          ? "尚未初始化：请先运行 `bz init`"
+          : "尚未初始化：请先运行 `bz init`；若这是换机恢复，请先 `bz login` 登录网盘后重试",
+      );
     },
     async saveVault(v: VaultFile): Promise<void> {
       await mkdir(paths.dir, { recursive: true });
       await writeFile(paths.vault, JSON.stringify(v, null, 2), "utf8");
     },
-    async resolveMk(opts = {}): Promise<Buffer> {
+    async resolveMk(opts: { passwordStdin?: boolean; local?: string } = {}): Promise<Buffer> {
       const cached = await accounts.getCachedMk(Date.now());
       if (cached) return cached;
-      const vault = await this.loadVault();
+      const vault = await this.loadVault({ local: opts.local });
       const pw = await resolveMasterPassword("主密码: ", opts);
       return unlockWithPassword(vault, pw);
     },
@@ -172,6 +192,21 @@ export async function baiduClientForCurrent(
   return new BaiduClient(rt.oauthConfig(), tokens.accessToken, rt.http, {
     uploadConcurrency: concurrency ?? rt.uploadConcurrency,
   });
+}
+
+/**
+ * 与 `makeBackend` 相同，但"没有可用后端"是一个正常返回值而非异常：
+ * 未登录且未给 `--local` 时返回 `null`，供云端保险库这类"能同步就同步"的路径判断。
+ *
+ * 只有"没有账号"这一种情况会转成 `null`；token 刷新失败、凭证缺失等真实故障照常抛出，
+ * 不能让它们伪装成"这台机器还没登录"。
+ */
+export async function backendIfPossible(
+  rt: Runtime,
+  localDir: string | undefined,
+): Promise<Backend | null> {
+  if (!localDir && !(await rt.accounts.getCurrent())) return null;
+  return makeBackend(rt, localDir);
 }
 
 /** 按 --local 选后端：本地目录 or 百度。`concurrency` 透传给百度分片上传并发度。 */

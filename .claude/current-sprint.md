@@ -8,56 +8,54 @@
 
 ---
 
-## 当前 Sprint：Phase 3 · S1+S2+D1+C1+P1 ✅ 完成（2026-07-24，待人工 git flow 合并）
+## 当前 Sprint：v1.1.0 · 云端保险库与配套能力 ✅ 开发完成（2026-07-25，待人工发版）
 
-**最后更新：** 2026-07-24（S1+S2+D1 全部完成，opus 三轮整分支评审均 Ready to merge）
+**最后更新：** 2026-07-25（T1–T8 全部完成，`bun test` 303 全绿 + 1 skip）
 
-- **设计：** `docs/superpowers/specs/2026-07-23-robust-upload-download-design.md`（S1+S2）、`docs/superpowers/specs/2026-07-24-daemon-scheduled-backup-design.md`（D1）
-- **计划：** `docs/superpowers/plans/2026-07-23-robust-upload-s1.md`、`docs/superpowers/plans/2026-07-23-robust-download-s2.md`、`docs/superpowers/plans/2026-07-24-daemon-scheduled-backup-d1.md`
-- **登记：** `.claude/sprint-plan.md` → Phase 3 · S1 / S2 / D1
-- **执行方式：** 子代理驱动开发（每任务 实现 + 评审），整分支评审后交人工按 git flow 合并。
+**来源：** 下游 `../bizhouzizhen`（自珍 GUI，闭源）在产品设计定稿时提出的引擎需求清单 **E-1~E-7**
+（其 `docs/superpowers/specs/2026-07-25-zizhen-product-design.md` §7 与 `人工TODO事项.md` H-19/H-20）。
+按跨仓纪律，一律回本仓改并发版，下游不 fork / 不 vendor / 不 patch。
+
+- **计划：** `docs/superpowers/plans/2026-07-25-v1.1.0-cloud-vault.md`
+- **登记：** `.claude/sprint-plan.md` → v1.1.0 章节；技术决策留痕见 `.claude/tech-spec-registry.md` §5.1.2
 
 ### 任务状态
-| 任务 | 说明 | 状态 |
-|-----|------|------|
-| S1-T1..T6 | 健壮上传（contentId 底座 / 并发池 / 上传日志 / manifest 缓存 / cmdPush 集成 / push -r） | ✅ 全部完成 |
-| S2-T1 | decryptChunksToFile 支持 skip 续传（定位写入）+ journal 上传专属字段改可选 | ✅ 已完成 |
-| S2-T2 | cmdPull 集成：幂等/在飞锁/分片续传/**端到端 contentId 校验**/原子落地/--force（抽 pullOneBundle） | ✅ 已完成 |
-| S2-T3 | pull -r 递归复用 pullOneBundle | ✅ 已完成 |
-| D1-T1 | 备份任务模型 + `backups.json` 持久化（add/list/rm/update，原子，无密钥） | ✅ 已完成 |
-| D1-T2 | CLI `bz backup add/list/rm`（`daemon.ts`，单向依赖 commands.ts） | ✅ 已完成 |
-| D1-T3 | `sweepJob` 幂等备份引擎 + `bz backup run` | ✅ 已完成 |
-| D1-T4 | 跨平台递归 watcher + 防抖（`watcher.ts`） | ✅ 已完成 |
-| D1-T5 | `bz daemon` 三触发编排 + `SerialJobRunner` 串行护栏 + 优雅退出 + config 间隔/防抖 | ✅ 已完成 |
 
-### 已完成里程碑（均归档于 `.claude/archive/`）
-- **M0 + M1**（加密引擎 + CLI）→ `sprint-0-m0-m1.md`
-- **v2 Phase 1–4 整体**（目录树 / 映射 / 整树备份 / mv-cp-rename / 回收站）→ `v2-cloud-fs.md`
+| 任务 | 需求 | 说明 | 状态 |
+|-----|------|------|------|
+| — | E-1 | 修正「换机只需重输主密码」的错误文档 | ✅ `c5f5863` |
+| T1 | E-2 前置 | Backend 通用 blob 原语 putBlob/getBlob/removeBlob | ✅ `dde7c20`+`de637d9` |
+| T2 | E-3 | scrypt N 2^15 → 2^17（老 vault 向前兼容） | ✅ `ed3b97b` |
+| T3 | E-2+E-4 | 云端保险库 `vault/cloud.ts` + 不透明命名 + 保留名过滤 | ✅ `853855f` |
+| T4 | E-2 | CLI 接线 + 换机取回 + 存量升级路径 + 强度关卡 | ✅ `e6d96bb` |
+| T5 | E-5 | 恢复密钥重导出/轮换 + `bz vault recovery-key` | ✅ `ab9cf49` |
+| T6 | E-6 | BaiduBackend `.trash` 回收站 | ✅ `108d6d3` |
+| T7 | E-7 | `getQuota` + `bz quota` | ✅ `37f8656` |
+| T8 | — | 中英文档 + `.claude/` 登记表 | ✅ `14cc696` + 本次 |
 
-### 代码状态
-- 分支 `feature/phase3`；`bun test` **180 全绿 + 1 skip**；typecheck/lint/build(3) 全过。
-- S1（健壮上传）+ S2（健壮下载）+ D1（daemon/定时备份）全部完成。S1/S2 两轮 opus 整分支评审均 ✅ Ready to merge，拦下并修复 2 Critical crypto（resume DEK / 确定性IV nonce 复用）+ 2 Important（S1）；S2 无新 Critical/Important。D1 各任务子代理驱动 + 逐任务评审（T1 拦下备份任务读失败吞错/tmp 文件名冲突 2 Important；T3 拦下 resolve(localDir) 与 cmdPushRecursive 未对齐；T4 拦下 stop() 竞态漏 FSWatcher）。
-- v2 已由人工合并至 `dev`；本分支由人工按 git flow 管理。
+### 待人工触发
+| 事项 | 编号 | 状态 |
+|------|------|------|
+| 发版：`scripts/bump-minor.sh` → 1.1.0 → push → npm publish → tap/bucket → GitHub Release | H-12 | 待执行 |
+| 真机联网验证（云端保险库 / 换机 / 改密 / `.trash` / quota；**尤其确认百度是否接受点开头的文件名**） | H-13 | 待验证 |
+| 其余存量人工项（daemon 真机、pwsh 补全、pdftoppm 预览） | H-09~H-11 | 待验证 |
 
-### 待人工触发（并行）
-| 事项 | 责任人 | 状态 |
-|------|--------|------|
-| 发版（`dev→main` tag + npm/tap/bucket，见 `docs/release/发布准备指南.md`） | 人工 | 待办 |
-| H-08 百度回收站管理接口联网验证 | 人工 | 待验证 |
-| `bz daemon` 真机集成验证（backup add → daemon → 改/加文件 → 观察增量上云/跳过 → Ctrl-C 优雅退出） | 人工 | 待验证 |
-
-### 新增模块/能力（Phase 3 落地）
-- `@bizhou/core` → `content/`（内容身份 contentId）、`journal/`（上传/下载日志：在飞锁+续传状态）、`cache/`（manifest 缓存）、`backup/`（备份任务模型 + `backups.json`）；`decryptChunksToFile` 支持 `skip` 续传；IV 方案改确定性（tech-spec §5.1.1）。
-- CLI → `pushOneFile`/`pullOneBundle` 两个共用内核（单文件与 `-r` 递归共用）；`push`/`pull` 增 `--force`，`push` 增 `--concurrency`；`daemon.ts`（`cmdBackup`/`sweepJob`/`SerialJobRunner`/`cmdDaemon`）+ `watcher.ts`（`watchRecursive`/`debounce`）：`bz backup add/list/rm/run` + `bz daemon`（启动即扫 + 实时监听防抖 + 定时兜底，SIGINT/SIGTERM 优雅退出，MK 驻内存至退出并 best-effort 抹除）。
+### 新增模块/能力
+- `@bizhou/core` → `vault/cloud.ts`（云端保险库）、`vault/strength.ts`（主密码强度，CLI 与 GUI 共用）、`vault/index.ts` 增 `wrappedRecoveryByMk` + `exportRecoveryKey`/`rotateRecoveryKey`/`hasExportableRecoveryKey`、`backend/reserved.ts`（保留名集中管理）、`BaiduBackend` 的 `.trash` 回收站、`BaiduClient.getQuota`。
+- CLI → `bz vault sync|status|recovery-key [--rotate]`、`bz quota`、`bz init --no-cloud-vault`；`unlock` 支持换机自动取回与存量补传；`passwd`/`recover` 抽出无交互实现体 `changeMasterPassword`/`recoverWithKey`（可测）。
 
 ### 活跃文件清单
 
-> 开工前工作树干净。Phase 3 改动集中于 `packages/core/src/{content,journal,cache,chunker,resource,crypto,bundle,baidu,backup}`、`packages/cli/src/{commands,runtime,index,daemon,watcher}.ts` 及对应测试 + `test/helpers/memory-fixture.ts`。
+`packages/core/src/{vault/{index,cloud,strength}.ts, backend/{index,local,baidu,reserved}.ts, baidu/client.ts, crypto/index.ts}`、
+`packages/cli/src/{commands,runtime,index,completion}.ts`，
+测试 `packages/core/test/{vault-cloud,password-strength,recovery-export,backend.baidu-trash,quota}.test.ts` + `test/helpers/fake-netdisk.ts`、
+`packages/cli/test/{vault-cloud-cmd,vault-recovery-cmd}.test.ts`。
 
 ### 近期重要改动记录
 
 | 时间 | 改动目的 | 涉及 |
 |------|---------|------|
-| 2026-07-23 | v2 云端 FS 层 Phase 1–4 全部完成（目录树/映射/整树备份/mv-cp-rename/回收站）；多处路径穿越与分派安全修复 | `packages/core/src/{config,cloudpath,backend,baidu,resource}`、`packages/cli/src/{runtime,commands,index}` |
-| 2026-07-23 | S1-T5：`cmdPush` 单文件路径接入内容去重（走 manifest 缓存）+ 在飞锁/续传（journal）+ `--force`/`--concurrency`；抽出共用 `pushOneFile`/`resolveUploadConcurrency`/`findDuplicateBundle`；修复 `onProgress`（同步、不 await）与 `appendDoneChunk`（非原子读改写）之间的竞态——用串行链式 Promise 队列保证"分片写完即落盘日志"，`packResource` 后/失败时均 `await` 该队列再决定 removeJournal 或保留续传；新增内存后端测试夹具 `test/helpers/memory-fixture.ts` | `packages/cli/src/{commands,runtime,index}.ts`、`packages/cli/test/{push-idempotency.test.ts,helpers/memory-fixture.ts}` |
-| 2026-07-24 | D1-T1..T5：备份任务模型 + `backups.json`（core）→ `bz backup add/list/rm/run`（`daemon.ts`）→ `sweepJob` 幂等引擎（复用 `pushOneFile`）→ `watchRecursive` 跨平台递归监听 + 防抖（`watcher.ts`）→ `bz daemon` 三触发编排（启动即扫/watch/定时）+ `SerialJobRunner` 每任务串行护栏（运行中多次触发合并为一次补跑）+ SIGINT/SIGTERM 优雅退出（停 watcher/清定时器/等在飞 sweep drain 完）+ MK best-effort 抹除；`runtime.ts` 新增 `daemonSweepIntervalMs`(默认 30min,min 5s)/`daemonDebounceMs`(默认 2s,min 100ms) config 字段 | `packages/core/src/backup/`、`packages/cli/src/{daemon,watcher,runtime,index}.ts`、`packages/cli/test/{backup-cmd,sweep,watcher,serial-runner}.test.ts` |
+| 2026-07-25 | 云端保险库落地：vault 原样上云（本身即密文信封），`fetchCloudVault` 严格区分「云端没有」与「取不到/损坏」——后者退化成 null 会让老用户在新机被误判为新用户、`bz init` 铸新 MK、云端数据永久锁死 | `packages/core/src/vault/cloud.ts`、`backend/reserved.ts` |
+| 2026-07-25 | 主密码强度做成**拦截式**关卡（不是提示）：上云后云服务商持有密文可离线爆破，密码强度成为唯一安全边界；`--no-cloud-vault` 是唯一绕过方式且必须显式告知「换机永久锁死」 | `packages/core/src/vault/strength.ts`、`packages/cli/src/commands.ts` |
+| 2026-07-25 | E-5 两条安全约束写进代码：导出恢复密钥强制重输主密码（不认已解锁会话）；`rotateRecoveryKey` 先 `verifyMk`（防用错 MK 覆盖唯一备用入口） | `packages/core/src/vault/index.ts`、`packages/cli/src/commands.ts` |
+| 2026-07-25 | E-6 百度回收站改 `.trash` 目录方案（原生 delete 无法管理）；新增带目录语义的假网盘夹具，回收站这类"搬树再搬回"的行为此前无法测 | `packages/core/src/backend/baidu.ts`、`test/helpers/fake-netdisk.ts` |

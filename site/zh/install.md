@@ -15,7 +15,7 @@ nav_order: 1
 **npm（跨平台）**
 ```bash
 npm i -g @bizhou/cli      # 全局安装，之后直接用 bz
-bz --version              # → 1.0.0
+bz --version              # → 1.1.0
 ```
 或一次性运行、无需安装：
 ```bash
@@ -37,6 +37,18 @@ bz --version
 ```
 
 > 也可从 [GitHub Release](https://github.com/twisker/bizhou/releases/latest) 下载 `bizhou-cli-*.tgz` 手动安装。
+
+### 升级到新版
+
+```bash
+npm i -g @bizhou/cli@latest          # npm
+brew update && brew upgrade bizhou   # Homebrew
+scoop update bizhou                  # Scoop
+```
+
+`bz` **不联网检查版本、不自动更新**（不向外发任何信标是有意的设计，见[安全模型](./security.html)），升级完全由你的包管理器驱动。各版本差异、兼容性承诺与历史版本下载见[版本与兼容性](./versions.html)。
+
+> **从 v1.0.x 升上来的用户**：升级后跑一次 `bz vault sync`，把保险库加密上云——这是"换机只需重输主密码"的前提。不做也能继续用，但换机 / 重装 / 硬盘损坏会让云端数据永久锁死。
 
 ### B. 从源码（开发 / 尝鲜）
 
