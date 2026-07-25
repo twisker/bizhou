@@ -21,8 +21,21 @@ cp "$REPO/packages/cli/dist/index.js" "$STAGE/index.js"
 cat > "$STAGE/package.json" <<JSON
 { "name": "@bizhou/cli", "version": "$VERSION", "type": "module", "bin": { "bz": "index.js" } }
 JSON
-# 确定性 tar（固定 mtime/owner），便于可复现 sha
-tar -C "$STAGE" --numeric-owner -czf "$OUT/$TARBALL" index.js package.json
+# 确定性 tar：可复现构建是本项目公开承诺的一部分（见 site/{zh,en}/versions.md 与
+# arch-spec §5.1）——任何人都应能从同一份源码得到逐字节相同的产物、自行核对 sha256。
+# 三个不确定性来源必须全部消除，少一个 sha 就会漂：
+#   1. 文件 mtime：每次构建都是"现在" → 统一 touch 成固定时刻
+#   2. gzip 头里的时间戳：tar -z 会写入当前时间 → 改用 gzip -n 显式关掉
+#   3. 归档内文件顺序与 uid/gid → 固定顺序 + --numeric-owner + uid/gid 归零
+# 固定时刻取一个与版本无关的常量；它只影响归档元数据，不影响解出来的内容。
+touch -t 202001010000 "$STAGE/index.js" "$STAGE/package.json"
+TAR_ID_FLAGS=(--numeric-owner)
+if tar --version 2>/dev/null | grep -qi "gnu tar"; then
+  TAR_ID_FLAGS+=(--owner=0 --group=0)
+else
+  TAR_ID_FLAGS+=(--uid 0 --gid 0) # bsdtar（macOS 默认）
+fi
+tar -C "$STAGE" "${TAR_ID_FLAGS[@]}" -cf - index.js package.json | gzip -n -9 >"$OUT/$TARBALL"
 SHA=$(shasum -a 256 "$OUT/$TARBALL" | cut -d' ' -f1)
 echo "  tarball: $OUT/$TARBALL"
 echo "  sha256 : $SHA"
