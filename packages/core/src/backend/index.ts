@@ -51,3 +51,4 @@ export interface Backend {
 
 export { BaiduBackend } from "./baidu.ts";
 export { LocalBackend } from "./local.ts";
+export { CLOUD_VAULT_NAME, RESERVED_ROOT_NAMES, TRASH_DIR } from "./reserved.ts";

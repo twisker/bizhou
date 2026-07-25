@@ -168,3 +168,10 @@ export function wrapDek(mk: Buffer, dek: Buffer): string {
 export function unwrapDek(mk: Buffer, wrapped: string): Buffer {
   return unwrapKey(mk, wrapped);
 }
+
+export {
+  CLOUD_VAULT_PATH,
+  fetchCloudVault,
+  putCloudVault,
+  removeCloudVault,
+} from "./cloud.ts";

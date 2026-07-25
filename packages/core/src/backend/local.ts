@@ -5,9 +5,7 @@ import { BUNDLE_SUFFIX } from "../bundle/index.ts";
 import { assertNameSegment, cloudBasename, normalizeCloudPath } from "../cloudpath/index.ts";
 import { LocalBundleStore } from "../store/index.ts";
 import type { Backend, DirListing, TrashEntry } from "./index.ts";
-
-/** 回收站根目录名（位于 baseDir 下，listDir 须忽略）。 */
-const TRASH_DIR = ".trash";
+import { RESERVED_ROOT_NAMES, TRASH_DIR } from "./reserved.ts";
 
 /** 本地目录后端：baseDir 下用真实子目录还原云端树；bundle 为 <id>.bz 目录。 */
 export class LocalBackend implements Backend {
@@ -53,7 +51,7 @@ export class LocalBackend implements Backend {
     const bundles: { id: string; dir: string }[] = [];
     for (const e of entries) {
       if (!e.isDirectory()) continue;
-      if (e.name === TRASH_DIR) continue;
+      if (RESERVED_ROOT_NAMES.has(e.name)) continue; // 引擎自用（回收站 / 云端保险库），不属于用户文件树
       if (e.name.endsWith(BUNDLE_SUFFIX)) {
         bundles.push({ id: e.name.slice(0, -BUNDLE_SUFFIX.length), dir });
       } else {

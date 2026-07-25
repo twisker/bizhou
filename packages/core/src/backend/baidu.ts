@@ -14,6 +14,7 @@ import {
 } from "../cloudpath/index.ts";
 import { BaiduApiError, BizhouError } from "../errors.ts";
 import type { Backend, DirListing, TrashEntry } from "./index.ts";
+import { RESERVED_ROOT_NAMES } from "./reserved.ts";
 
 /** 百度开放平台未提供回收站管理接口（list/restore/delete/clear），只能靠 App/网页兜底。 */
 const NO_TRASH_MANAGEMENT_MSG =
@@ -39,6 +40,7 @@ export class BaiduBackend implements Backend {
     const bundles: { id: string; dir: string }[] = [];
     for (const e of entries) {
       if (!e.isdir) continue;
+      if (RESERVED_ROOT_NAMES.has(e.filename)) continue; // 引擎自用（回收站 / 云端保险库）
       if (e.filename.endsWith(BUNDLE_SUFFIX)) {
         bundles.push({ id: e.filename.slice(0, -BUNDLE_SUFFIX.length), dir });
       } else {
