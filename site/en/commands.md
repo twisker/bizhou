@@ -115,7 +115,9 @@ Delete to the **recycle bin**. Deleting a directory requires `--yes`.
 ### `bz trash [list | restore <id> | rm <id> | clear]`
 Recycle-bin management: list / restore / permanently delete one / clear all.
 
-> If Baidu's recycle-bin management API is unavailable, `trash` points you to the Baidu Netdisk app/web; deleting into the native recycle bin itself works.
+> Baidu's open platform offers no recycle-bin management API, so the recycle bin lives inside the app sandbox at `/apps/bizhou/.trash/`:
+> list / restore / delete one / clear all work, with the same semantics as the `--local` backend.
+> Note that trashed items still consume netdisk quota until `bz trash clear`.
 
 ---
 

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   APP_ROOT,
   type BaiduClient,
@@ -14,11 +15,19 @@ import {
 } from "../cloudpath/index.ts";
 import { BaiduApiError, BizhouError } from "../errors.ts";
 import type { Backend, DirListing, TrashEntry } from "./index.ts";
-import { RESERVED_ROOT_NAMES } from "./reserved.ts";
+import { RESERVED_ROOT_NAMES, TRASH_DIR } from "./reserved.ts";
 
-/** 百度开放平台未提供回收站管理接口（list/restore/delete/clear），只能靠 App/网页兜底。 */
-const NO_TRASH_MANAGEMENT_MSG =
-  "百度开放平台未提供回收站管理接口，请到百度网盘 App/网页的回收站操作";
+/**
+ * 回收站（E-6）：百度开放平台没有回收站管理接口（列出/还原/永久删除/清空都没有），
+ * 走原生 delete 的话，删掉的东西只能到百度网盘 App 里翻，本产品无从管理。
+ * 因此在应用沙盒内自建 `/apps/bizhou/.trash/`，语义与 LocalBackend 完全对齐。
+ *
+ * 代价（有意接受）：回收站里的内容仍占用网盘配额，直到用户 `trash clear`；
+ * 好处：删除/还原/清空全部可编程，GUI 才可能有一个像样的回收站。
+ *
+ * 布局：`.trash/<entryId>/<原名>`（内容）+ `.trash/<entryId>.json`（原路径与删除时间）。
+ */
+const TRASH_PREFIX = `/${TRASH_DIR}`;
 
 /** 百度后端：真实目录建在 /apps/bizhou 下。 */
 export class BaiduBackend implements Backend {
@@ -67,25 +76,83 @@ export class BaiduBackend implements Backend {
     await this.client.rename(this.remote(srcCloudPath), newName);
   }
 
-  /** 删到百度原生回收站（filemanager delete）。deletedAt 由核心库以外注入，此后端不使用。 */
-  async trashPath(cloudPath: string, _deletedAt: string): Promise<void> {
-    await this.client.deletePaths([this.remote(cloudPath)]);
+  private trashItemDir(entryId: string): string {
+    assertNameSegment(entryId); // 防 entryId 含 ../ 逃逸 .trash
+    return `${TRASH_PREFIX}/${entryId}`;
+  }
+
+  private trashMetaPath(entryId: string): string {
+    assertNameSegment(entryId);
+    return `${TRASH_PREFIX}/${entryId}.json`;
+  }
+
+  /** 读回收站条目元数据；不存在即报错——"还原了个不存在的东西"绝不能静默成功。 */
+  private async readTrashEntry(entryId: string): Promise<TrashEntry> {
+    const raw = await this.getBlob(this.trashMetaPath(entryId));
+    if (!raw) throw new BizhouError("BAIDU", `回收站中没有这一条：${entryId}`);
+    return JSON.parse(raw.toString("utf8")) as TrashEntry;
+  }
+
+  /** `.trash` 是否已存在（尚未删过任何东西时它不存在，属正常情况，不是错误）。 */
+  private async trashDirEntries(): Promise<RemoteEntry[] | null> {
+    try {
+      return await this.client.list(this.remote(TRASH_PREFIX));
+    } catch (err) {
+      if (err instanceof BaiduApiError && err.errno === ERRNO_PATH_NOT_FOUND) return null;
+      throw err; // 其它失败如实抛出，不能伪装成"回收站是空的"
+    }
+  }
+
+  async trashPath(cloudPath: string, deletedAt: string): Promise<void> {
+    const originalPath = normalizeCloudPath(cloudPath);
+    const name = cloudBasename(originalPath);
+    const entryId = randomBytes(8).toString("hex");
+    const itemDir = this.trashItemDir(entryId);
+
+    await this.client.mkdir(this.remote(itemDir));
+    await this.client.move(this.remote(originalPath), this.remote(itemDir));
+    // 元数据后写：内容已经安全落在 .trash 里，此时写失败最坏是"条目列不出来"，
+    // 而不是"东西已经从原位置消失、却哪儿都找不到"。
+    const entry: TrashEntry = { entryId, name, originalPath, deletedAt };
+    await this.putBlob(this.trashMetaPath(entryId), Buffer.from(JSON.stringify(entry), "utf8"));
   }
 
   async listTrash(): Promise<TrashEntry[]> {
-    throw new BizhouError("BAIDU", NO_TRASH_MANAGEMENT_MSG);
+    const entries = await this.trashDirEntries();
+    if (entries === null) return [];
+    const out: TrashEntry[] = [];
+    for (const e of entries) {
+      if (e.isdir || !e.filename.endsWith(".json")) continue;
+      out.push(await this.readTrashEntry(e.filename.slice(0, -".json".length)));
+    }
+    return out;
   }
 
-  async restoreTrash(_entryId: string): Promise<void> {
-    throw new BizhouError("BAIDU", NO_TRASH_MANAGEMENT_MSG);
+  async restoreTrash(entryId: string): Promise<void> {
+    const entry = await this.readTrashEntry(entryId);
+    const targetDir = cloudDirname(entry.originalPath);
+    await this.client.mkdir(this.remote(targetDir)); // 原目录可能已被删掉
+    await this.client.move(
+      this.remote(`${this.trashItemDir(entryId)}/${entry.name}`),
+      this.remote(targetDir),
+    );
+    await this.client.deletePaths([
+      this.remote(this.trashItemDir(entryId)),
+      this.remote(this.trashMetaPath(entryId)),
+    ]);
   }
 
-  async deleteTrash(_entryId: string): Promise<void> {
-    throw new BizhouError("BAIDU", NO_TRASH_MANAGEMENT_MSG);
+  async deleteTrash(entryId: string): Promise<void> {
+    await this.readTrashEntry(entryId); // 不存在就报错，而不是发一次删空气的请求
+    await this.client.deletePaths([
+      this.remote(this.trashItemDir(entryId)),
+      this.remote(this.trashMetaPath(entryId)),
+    ]);
   }
 
   async clearTrash(): Promise<void> {
-    throw new BizhouError("BAIDU", NO_TRASH_MANAGEMENT_MSG);
+    if ((await this.trashDirEntries()) === null) return; // 本就没有回收站：幂等
+    await this.client.deletePaths([this.remote(TRASH_PREFIX)]);
   }
 
   /**
