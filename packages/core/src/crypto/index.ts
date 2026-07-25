@@ -44,12 +44,22 @@ export interface ScryptParams {
 }
 
 /**
- * 默认 scrypt 参数。N=2^15 属交互式登录的稳健档位；
- * 记入 vault 后可随硬件演进上调而不影响老数据（老数据用其自带参数解开）。
+ * 默认 scrypt 参数。
+ *
+ * N=2^17（128 MiB）—— v1.1.0 起提升自 2^15（32 MiB）。起因：v1.1.0 把 vault 加密上云，
+ * 云服务商直接持有密文，可离线、无频率限制地爆破主密码；2^15 是"交互式登录"档位，只
+ * 适合"文件不出设备"的旧威胁模型。N 每 +1 bit 使攻击者单次猜测的时间与内存成本各 ×2；
+ * 4× 提升下，合法用户的解锁成本（每台设备一次）多花约 0.3–0.5s，攻击者的离线爆破成本
+ * 同比例升高——这是本代码库里最便宜的一次安全加固。
+ *
+ * 向前兼容是这次调参能落地的关键：kdf 参数记在每个 vault 文件内（`VaultFile.kdf`），
+ * `unlockWithPassword`/`unlockWithRecovery` 派生时用的是 `vault.kdf`，不是这个常量——
+ * 老 vault（N=2^15）永远用自己那份参数解锁，不受这里上调影响；只有新建的 vault 才会
+ * 采用新默认值。参见 packages/core/src/vault/index.ts 的 unlockWithPassword。
  */
 export const DEFAULT_SCRYPT: ScryptParams = {
   algo: "scrypt",
-  N: 1 << 15,
+  N: 1 << 17,
   r: 8,
   p: 1,
   keylen: KEY_BYTES,
