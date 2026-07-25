@@ -169,9 +169,10 @@ export function unwrapDek(mk: Buffer, wrapped: string): Buffer {
   return unwrapKey(mk, wrapped);
 }
 
+export { CLOUD_VAULT_PATH, fetchCloudVault, putCloudVault, removeCloudVault } from "./cloud.ts";
 export {
-  CLOUD_VAULT_PATH,
-  fetchCloudVault,
-  putCloudVault,
-  removeCloudVault,
-} from "./cloud.ts";
+  assessPasswordStrength,
+  MIN_PASSWORD_BITS,
+  MIN_PASSWORD_LENGTH,
+  type PasswordStrength,
+} from "./strength.ts";

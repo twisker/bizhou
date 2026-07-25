@@ -31,6 +31,7 @@ import {
   cmdShare,
   cmdTrash,
   cmdUnlock,
+  cmdVault,
   createRuntime,
 } from "./commands.ts";
 import { cmdComplete, cmdCompletion } from "./completion.ts";
@@ -42,11 +43,12 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
 用法: bz <命令> [参数] [选项]
 
 密钥与会话:
-  init                     首次设置主密码，生成恢复密钥
-  unlock [--ttl <秒>]      输入主密码解锁本设备会话（缓存主密钥）
+  init [--no-cloud-vault]  首次设置主密码，生成恢复密钥；默认把保险库加密上云（换机恢复的前提）
+  unlock [--ttl <秒>]      输入主密码解锁本设备会话（缓存主密钥）；本机无保险库时自动从云端取回
   lock                     立即上锁（清除缓存主密钥）
-  passwd                   修改主密码（恢复密钥不变）
+  passwd                   修改主密码（恢复密钥不变；云端副本同步更新）
   recover                  用恢复密钥重设主密码
+  vault <sync|status>      保险库上云 / 查看本机与云端状态
 
 账号:
   login [--name <n>] [--device] [--port <p>]   OAuth 登录百度
@@ -123,6 +125,7 @@ async function main(argv: string[]): Promise<number> {
       "7z": { type: "boolean" },
       ttl: { type: "string" },
       force: { type: "boolean" },
+      "no-cloud-vault": { type: "boolean" },
       recursive: { type: "boolean", short: "r" },
       to: { type: "string" },
       yes: { type: "boolean" },
@@ -148,7 +151,11 @@ async function main(argv: string[]): Promise<number> {
 
   switch (cmd) {
     case "init":
-      await cmdInit(rt, { ...common, force: Boolean(values.force) });
+      await cmdInit(rt, {
+        ...common,
+        force: Boolean(values.force),
+        noCloudVault: Boolean(values["no-cloud-vault"]),
+      });
       return 0;
     case "unlock":
       await cmdUnlock(rt, { ...common, ttl: values.ttl ? Number(values.ttl) : undefined });
@@ -160,7 +167,10 @@ async function main(argv: string[]): Promise<number> {
       await cmdPasswd(rt, common);
       return 0;
     case "recover":
-      await cmdRecover(rt);
+      await cmdRecover(rt, common);
+      return 0;
+    case "vault":
+      await cmdVault(rt, positionals[1], common);
       return 0;
     case "login":
       await cmdLogin(rt, {

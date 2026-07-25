@@ -4,7 +4,7 @@ import { COMMANDS, GLOBAL_FLAGS, topLevelCommandNames } from "../src/completion.
 // index.ts switch 里可分发的全部命令（含隐藏 completion；不含隐藏 __complete）。
 // 新增命令时必须同步此列表与 COMMANDS，否则本测试红。
 const KNOWN = [
-  "init", "unlock", "lock", "passwd", "recover", "login", "logout", "account",
+  "init", "unlock", "lock", "passwd", "recover", "vault", "login", "logout", "account",
   "push", "pull", "mkdir", "ls", "info", "rm", "trash", "mv", "cp", "rename",
   "share", "preview", "backup", "daemon", "completion",
 ];

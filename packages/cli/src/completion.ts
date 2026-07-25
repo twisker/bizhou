@@ -47,11 +47,17 @@ const CLOUD_ID: ArgKind = { kind: "cloud", ctx: "bundle-id" };
 const CLOUD_DIR: ArgKind = { kind: "cloud", ctx: "cloud-dir" };
 
 export const COMMANDS: CommandSpec[] = [
-  { name: "init", flags: [F("--force")], args: [] },
+  { name: "init", flags: [F("--force"), F("--no-cloud-vault")], args: [] },
   { name: "unlock", flags: [F("--ttl", true)], args: [] },
   { name: "lock", flags: [], args: [] },
   { name: "passwd", flags: [], args: [] },
   { name: "recover", flags: [], args: [] },
+  {
+    name: "vault",
+    flags: [],
+    args: [{ kind: "subcommand", names: ["sync", "status"] }],
+    subArgs: { sync: [], status: [] },
+  },
   {
     name: "login",
     flags: [F("--name", true), F("--device"), F("--port", true)],
