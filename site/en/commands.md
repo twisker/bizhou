@@ -21,11 +21,17 @@ Below, `bz` denotes the CLI (replace with `bun packages/cli/src/index.ts` when r
 
 ## Keys & session
 
-### `bz init`
-Set the master password for the first time and generate a **recovery key** (write it down!). Creates the vault under the key root.
+### `bz init [--no-cloud-vault]`
+Set the master password for the first time and generate a **recovery key** (write it down!). Creates the vault under the key root and, by default, uploads an **encrypted copy** to your netdisk — the prerequisite for "a new machine needs only your master password".
+
+That is why the master password goes through a **blocking** strength check: once the vault is in the cloud, the provider holds that ciphertext and can brute-force it offline without limits, making password strength the only remaining boundary. Below the bar the command refuses and tells you exactly why (a passphrase of four or five unrelated words is the easiest fix).
+
+`--no-cloud-vault` skips the upload and keeps the vault local only. The cost: a new machine, a reinstall, or a dead disk locks your data **permanently** unless you back up the key root yourself.
 
 ### `bz unlock [--ttl <seconds>]`
 Enter the master password to unlock this device's session (caches the master key for a while so later commands don't re-prompt). `--ttl` sets the cache duration.
+
+If this machine has no vault, it is **fetched from the cloud automatically** (moving machines). Conversely, if the machine has one and the cloud does not (v1.0.x users), the password you just typed is strength-checked and the vault backfilled — below the bar it only warns and uploads nothing.
 
 ### `bz lock`
 Lock immediately, clearing the cached master key.
@@ -34,7 +40,18 @@ Lock immediately, clearing the cached master key.
 Change the master password (recovery key unchanged; only MK is re-wrapped, no resource touched).
 
 ### `bz recover`
-Reset the master password using the recovery key (the fallback when you forget it).
+Reset the master password using the recovery key (the fallback when you forget it). The cloud copy is updated afterwards.
+
+### `bz vault sync`
+Upload this machine's vault to the cloud (the upgrade path for v1.0.x users). **Always re-prompts for the master password**: it proves you are the owner and is the only moment the strength check can be made.
+
+### `bz vault status`
+Show local / cloud vault state and whether they match (no password needed). If you changed your master password and the cloud copy lagged behind, this says so.
+
+### `bz vault recovery-key [--rotate]`
+Re-export the recovery key. By default you get **the same string as at init time**; `--rotate` mints a new one (**the old one is void immediately**; uploaded resources are unaffected), which is the only path for vaults created before v1.1.0.
+
+**The entry always re-prompts for the master password** — an already-unlocked session does not count. A recovery key is a long-lived credential that changing your password cannot revoke, so whoever borrows an unlocked device must not be able to walk away with it.
 
 ---
 
@@ -45,6 +62,9 @@ OAuth login to Baidu. Default: browser auth + local callback; `--device` uses th
 
 ### `bz logout`
 Log out the current account.
+
+### `bz quota`
+Show netdisk total / used (via Baidu `/api/quota`). Failures raise an error rather than rendering as 0.
 
 ### `bz account [list | use <name> | add <name>]`
 Multi-account management: list / switch / add. Each account has its own token and `/apps/bizhou/` space.
