@@ -213,6 +213,15 @@ describe("存量用户升级路径（本地有保险库、云端没有）", () =
     expect(await fetchCloudVault(cloudBackend())).toBeNull();
   });
 
+  test("bz vault status：本机与云端不一致时说出来（不静默）", async () => {
+    const rt = createRuntime();
+    await cmdInit(rt, { local: cloud });
+    // 只改本地、不动云端：模拟"改完密码但上云失败"的中间态
+    const v = await rt.loadVault({ local: cloud });
+    await rt.saveVault({ ...v, createdAt: "1999-01-01T00:00:00.000Z" });
+    await expect(cmdVault(rt, "status", { local: cloud })).resolves.toBeUndefined();
+  });
+
   test("bz vault status 不抛错，且不需要主密码", async () => {
     const rt = createRuntime();
     await cmdInit(rt, { local: cloud });

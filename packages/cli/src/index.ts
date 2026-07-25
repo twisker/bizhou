@@ -48,7 +48,9 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
   lock                     立即上锁（清除缓存主密钥）
   passwd                   修改主密码（恢复密钥不变；云端副本同步更新）
   recover                  用恢复密钥重设主密码
-  vault <sync|status>      保险库上云 / 查看本机与云端状态
+  vault sync               把本机保险库加密上云（存量用户的升级入口）
+  vault status             查看本机 / 云端保险库状态
+  vault recovery-key [--rotate]   重新导出恢复密钥（须重输主密码）；--rotate 换一串新的、旧的作废
 
 账号:
   login [--name <n>] [--device] [--port <p>]   OAuth 登录百度
@@ -126,6 +128,7 @@ async function main(argv: string[]): Promise<number> {
       ttl: { type: "string" },
       force: { type: "boolean" },
       "no-cloud-vault": { type: "boolean" },
+      rotate: { type: "boolean" },
       recursive: { type: "boolean", short: "r" },
       to: { type: "string" },
       yes: { type: "boolean" },
@@ -170,7 +173,7 @@ async function main(argv: string[]): Promise<number> {
       await cmdRecover(rt, common);
       return 0;
     case "vault":
-      await cmdVault(rt, positionals[1], common);
+      await cmdVault(rt, positionals[1], { ...common, rotate: Boolean(values.rotate) });
       return 0;
     case "login":
       await cmdLogin(rt, {

@@ -25,12 +25,14 @@ import {
   deriveKey,
   downloadLocalPath,
   exchangeCodeForToken,
+  exportRecoveryKey,
   fetchCloudVault,
   generateBundleId,
   generateKey,
   generateSalt,
   getCachedManifest,
   groupBase32,
+  hasExportableRecoveryKey,
   hashPlaintextFile,
   invalidateManifest,
   isLockAlive,
@@ -49,6 +51,7 @@ import {
   readResourceMeta,
   removeJournal,
   renameResource,
+  rotateRecoveryKey,
   startDeviceFlow,
   unlockWithPassword,
   unlockWithRecovery,
@@ -321,12 +324,14 @@ export async function cmdRecover(rt: Runtime, opts: CommonOpts = {}): Promise<vo
   await recoverWithKey(rt, { ...opts, recoveryKey, newPassword });
 }
 
-/** `bz vault <sync|status>`：保险库上云与状态查看。 */
+/** `bz vault <sync|status|recovery-key>`：保险库上云、状态查看、恢复密钥重导出。 */
 export async function cmdVault(
   rt: Runtime,
   sub: string | undefined,
-  opts: CommonOpts,
+  opts: CommonOpts & { rotate?: boolean },
 ): Promise<void> {
+  if (sub === "recovery-key") return cmdVaultRecoveryKey(rt, opts);
+
   if (sub === "status") {
     const localHas = rt.vaultExists();
     info(`本机保险库：${localHas ? rt.paths.vault : "无"}`);
@@ -351,7 +356,7 @@ export async function cmdVault(
   }
 
   if (sub !== "sync") {
-    throw new BizhouError("INVALID_ARG", "用法：bz vault <sync|status>");
+    throw new BizhouError("INVALID_ARG", "用法：bz vault <sync|status|recovery-key>");
   }
 
   if (!rt.vaultExists()) {
@@ -378,6 +383,44 @@ export async function cmdVault(
       ].join("\n"),
     );
   }
+}
+
+/**
+ * `bz vault recovery-key [--rotate]`：重新导出恢复密钥（E-5）。
+ *
+ * **入口强制重输主密码**，即便本设备会话已解锁。原因：恢复密钥是一张改主密码也
+ * 撤销不掉的长期通行证；若"会话已解锁"就能取走它，任何一次借用了解锁设备的人都
+ * 拿到了永久后门，而改密这个补救动作对它无效。这一条是 E-5 能成立的前提，
+ * 不要为了顺手而放宽。
+ */
+async function cmdVaultRecoveryKey(
+  rt: Runtime,
+  opts: CommonOpts & { rotate?: boolean },
+): Promise<void> {
+  const vault = await rt.loadVault({ local: opts.local });
+  const pw = await resolveMasterPassword("主密码（导出恢复密钥须再次验证）: ", opts);
+  const mk = await unlockWithPassword(vault, pw); // 密码错误 → AuthError，什么都不改
+
+  if (opts.rotate) {
+    const { vault: v2, recoveryKey } = rotateRecoveryKey(vault, mk);
+    await rt.saveVault(v2);
+    warn("旧的恢复密钥已作废。以下是新的恢复密钥，只显示这一次，请离线妥善保管：");
+    out(c.bold(recoveryKey));
+    await pushVaultToCloud(rt, v2, opts); // 云端副本必须跟上，否则换机取回的只认已作废的旧密钥
+    return;
+  }
+
+  if (!hasExportableRecoveryKey(vault)) {
+    throw new BizhouError(
+      "VAULT",
+      [
+        "该保险库创建于 v1.1.0 之前，没有保存可重导出的恢复密钥副本。",
+        "可以用 `bz vault recovery-key --rotate` 换一串新的（旧密钥随即作废，已上传的资源不受影响）。",
+      ].join("\n"),
+    );
+  }
+  warn("以下是你的恢复密钥（与初始化时那串相同），请离线妥善保管：");
+  out(c.bold(exportRecoveryKey(vault, mk)));
 }
 
 // ---- login / logout / account --------------------------------------------

@@ -54,9 +54,9 @@ export const COMMANDS: CommandSpec[] = [
   { name: "recover", flags: [], args: [] },
   {
     name: "vault",
-    flags: [],
-    args: [{ kind: "subcommand", names: ["sync", "status"] }],
-    subArgs: { sync: [], status: [] },
+    flags: [F("--rotate")],
+    args: [{ kind: "subcommand", names: ["sync", "status", "recovery-key"] }],
+    subArgs: { sync: [], status: [], "recovery-key": [] },
   },
   {
     name: "login",
