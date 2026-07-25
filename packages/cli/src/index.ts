@@ -91,6 +91,10 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
   -h, --help               显示帮助
   -v, --version            显示版本
 
+换机恢复: 新机器 `bz login` 后 `bz unlock` 会自动取回云端保险库，无需搬运任何文件。
+          v1.0.x 升级上来的用户跑一次 `bz vault sync`（或直接 unlock，会顺带补传）。
+          注意 init/vault sync 会拦截强度不足的主密码——上云后主密码是唯一的安全边界。
+
 凭证: 在项目 .env 配置 BAIDU_APP_KEY / BAIDU_SECRET_KEY（见 .env.example）。`;
 
 // 构建期由 tsup 注入（发布产物）；开发期未定义，回退读根 VERSION 文件。

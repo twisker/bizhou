@@ -28,6 +28,7 @@ Cloud storage scans uploaded content and may throttle or ban files based on what
 ## Key features
 
 - **Encrypted upload / restore download**: optional compression → AES-256-GCM → logical chunks (default 100MB) → bundle → upload; download merges & decrypts automatically, **byte-for-byte identical**.
+- **Cloud vault (v1.1.0)**: an encrypted copy of your vault is stored in your own netdisk, so a new machine needs only `bz login` + `bz unlock` — nothing to carry over. The trade-off: the provider holds that ciphertext and can brute-force it offline, so `bz init` refuses weak master passwords and the KDF is now scrypt N=2¹⁷; opt out with `--no-cloud-vault`.
 - **Concurrent upload**: a bounded pool uploads the 4MB transfer slices within a chunk in parallel for throughput (`--concurrency`, default 4).
 - **Resumable transfers**: interrupted uploads/downloads resume (same DEK & chunks reused; download writes to a temp file with atomic landing + end-to-end verification).
 - **Content dedup + in-flight lock**: if identical content already exists in the target directory it is skipped; if identical content is currently uploading you are told and it stops — no duplicate uploads.
@@ -36,7 +37,7 @@ Cloud storage scans uploaded content and may throttle or ban files based on what
 - **Shell completion**: `bz completion <bash|zsh|powershell>` — static completion of commands/subcommands/flags + local dynamic completion of backup ids / account names.
 - **Multi-type previews**: image/video thumbnails, audio clips, **PDF first page** (written to a file); **first 32KB of text/code, archive file listings** (printed to stdout by `bz preview`). Previews are encrypted separately, invisible to the cloud.
 - **Sharing**: `bz share --code` (export a resource's DEK share code) / `--7z` (a 7z-AES single package any third party can open).
-- **Multi-account**: `bz account`, each with its own token and `/apps/bizhou/` space.
+- **Multi-account / quota**: `bz account`, each with its own token and `/apps/bizhou/` space; `bz quota` shows netdisk total/used.
 
 ## Architecture
 
@@ -94,8 +95,9 @@ Full tutorials on the [docs site · Quick start](https://twisker.github.io/bizho
 
 | Command | Description |
 |---|---|
-| `bz init` / `unlock` / `lock` / `passwd` / `recover` | master password, recovery key, session unlock/lock, change password |
-| `bz login` / `logout` / `account [list\|use <n>\|add <n>]` | Baidu OAuth login, logout, multi-account |
+| `bz init [--no-cloud-vault]` / `unlock` / `lock` / `passwd` / `recover` | master password, recovery key, session unlock/lock, change password (vault goes to the cloud by default; `unlock` fetches it back on a new machine) |
+| `bz vault sync` / `status` / `recovery-key [--rotate]` | put the vault in the cloud / check state / re-export the recovery key (master password required) |
+| `bz login` / `logout` / `quota` / `account [list\|use <n>\|add <n>]` | Baidu OAuth login, logout, multi-account |
 | `bz push <path> [-r] [--to <cloud dir>] [--chunk] [--compress] [--no-split] [--name] [--preview] [--force] [--concurrency N]` | encrypted upload (`-r` whole tree; dedup/resume/in-flight-lock/concurrency) |
 | `bz pull <id\|cloud dir> [-r] [--out <dir>] [--force]` | restore into the file root (idempotent/resume/end-to-end verify/atomic landing) |
 | `bz mkdir <dir>` / `ls [dir] [-r]` / `info <id>` | make dir / list (real names) / view metadata |
@@ -153,6 +155,9 @@ pnpm run build          # build core (ESM+d.ts) and the self-contained CLI
 - ✅ **v2** — cloud filesystem layer: real directory trees, two configurable local roots, `mv/cp/rename`, recycle bin, `-r` recursive whole-tree.
 - ✅ **Phase 3 (polish & ecosystem, CLI-only)** — robust upload (concurrency/resume/dedup/in-flight-lock), robust download (idempotent/chunk-resume/end-to-end verify), daemon/scheduled backup, shell completion, more preview types.
 - ✅ **Release** — v1.0.0 shipped: GitHub Release + npm (`@bizhou/cli`/`@bizhou/core`) + Homebrew tap + Scoop bucket + docs site.
+- ✅ **v1.1.0** — cloud vault (new-machine recovery), scrypt N=2¹⁷, recovery-key re-export, recycle bin on the Baidu backend, netdisk quota.
+
+> Per-release changes, the **compatibility promise** (data written by older versions stays readable), and older downloads: see [Versions & compatibility](https://twisker.github.io/bizhou/en/versions.html). `bz` never checks for versions, never self-updates, and sends no telemetry.
 - ⏳ **Next** — homebrew-core / winget (once there's a user base).
 
 ## License

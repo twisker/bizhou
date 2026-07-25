@@ -28,6 +28,7 @@
 ## 主要能力
 
 - **加密上传 / 还原下载**：可选压缩 → AES-256-GCM 加密 → 逻辑分片（默认 100MB）→ bundle → 上传；下载自动合并解密、**字节级一致**。
+- **云端保险库（v1.1.0）**：保险库加密副本存进你自己的网盘，**换机只需 `bz login` + `bz unlock`**，不搬任何文件。代价是云服务商持有该密文、可离线爆破，故 `bz init` 拦截弱主密码、KDF 提到 scrypt N=2¹⁷；不愿上云可 `--no-cloud-vault`。
 - **并发上传**：片内 4MB 传输分片限流池并发，提吞吐（`--concurrency`，默认 4）。
 - **断点续传**：上传/下载中断可续（复用同一 DEK 与分片；下载走临时文件 + 原子落地 + 端到端校验）。
 - **内容去重 + 在飞锁**：同内容已在目标目录则跳过；同内容正在传则提醒结束——防重复上传。
@@ -36,7 +37,7 @@
 - **shell 补全**：`bz completion <bash|zsh|powershell>`——命令/子命令/flag 静态补全 + 备份 id/账号名本地动态补全。
 - **多类型预览**：图片/视频缩略、音频片段、**PDF 首页**（落文件）；**文本/代码前 32KB、压缩包文件列表**（`bz preview` 直接打 stdout）。预览独立加密存储、云端零可见。
 - **分享**：`bz share --code`（导出资源 DEK 分享码）/ `--7z`（7z-AES 单包，第三方可解）。
-- **多账号**：`bz account`，每账号独立 token 与 `/apps/bizhou/` 空间。
+- **多账号 / 配额**：`bz account`，每账号独立 token 与 `/apps/bizhou/` 空间；`bz quota` 看网盘总量与已用。
 
 ## 架构
 
@@ -94,8 +95,9 @@ bz push ./某目录 -r --to /工作     # 整个目录树加密备份
 
 | 命令 | 说明 |
 |---|---|
-| `bz init` / `unlock` / `lock` / `passwd` / `recover` | 主密码、恢复密钥、会话解锁/上锁、改密 |
-| `bz login` / `logout` / `account [list\|use <n>\|add <n>]` | 百度 OAuth 登录、注销、多账号 |
+| `bz init [--no-cloud-vault]` / `unlock` / `lock` / `passwd` / `recover` | 主密码、恢复密钥、会话解锁/上锁、改密（默认保险库加密上云；unlock 在新机自动取回） |
+| `bz vault sync` / `status` / `recovery-key [--rotate]` | 保险库上云 / 状态自查 / 重新导出恢复密钥（须重输主密码） |
+| `bz login` / `logout` / `quota` / `account [list\|use <n>\|add <n>]` | 百度 OAuth 登录、注销、网盘配额、多账号 |
 | `bz push <path> [-r] [--to <云端目录>] [--chunk] [--compress] [--no-split] [--name] [--preview] [--force] [--concurrency N]` | 加密上传（`-r` 整树；去重/续传/在飞锁/并发） |
 | `bz pull <id\|云端目录> [-r] [--out <dir>] [--force]` | 下载还原到文件根（幂等/续传/端到端校验/原子落地） |
 | `bz mkdir <目录>` / `ls [目录] [-r]` / `info <id>` | 建目录 / 列目录（真名）/ 看元数据 |
@@ -152,8 +154,11 @@ pnpm run build          # 构建 core（ESM+d.ts）与自包含 CLI
 - ✅ **M1** — 核心库 + CLI 全 pipeline；预览、7z-AES 导出、多账号；>4GB 大文件。
 - ✅ **v2** — 云端文件系统层：真实目录树、双可配本地根、`mv/cp/rename`、回收站、`-r` 递归整树。
 - ✅ **Phase 3（打磨与生态，仅 CLI）** — 健壮上传（并发/续传/去重/在飞锁）、健壮下载（幂等/分片续传/端到端校验）、daemon/定时备份、shell 补全、更多预览类型。
-- ✅ **发布** — v1.0.0 已发布：GitHub Release + npm（`@bizhou/cli`/`@bizhou/core`）+ Homebrew tap + Scoop bucket + 文档站。
+- ✅ **发布** — v1.0.0：GitHub Release + npm（`@bizhou/cli`/`@bizhou/core`）+ Homebrew tap + Scoop bucket + 文档站。
+- ✅ **v1.1.0** — 云端保险库（换机恢复）、scrypt N=2¹⁷、恢复密钥重导出、百度后端回收站、网盘配额。
 - ⏳ **后续** — 进 homebrew-core / winget（待用户量）。
+
+> 各版本差异、**兼容性承诺**（老版本写的数据永远读得出来）、历史版本下载：见[版本与兼容性](https://twisker.github.io/bizhou/zh/versions.html)。`bz` 不联网检查版本、不自动更新、不发遥测。
 
 ## 授权
 

@@ -15,7 +15,7 @@ nav_order: 1
 **npm (cross-platform)**
 ```bash
 npm i -g @bizhou/cli      # global install, then use bz directly
-bz --version              # → 1.0.0
+bz --version              # → 1.1.0
 ```
 Or run once, no install:
 ```bash
@@ -37,6 +37,18 @@ bz --version
 ```
 
 > You can also download `bizhou-cli-*.tgz` from the [GitHub Release](https://github.com/twisker/bizhou/releases/latest) and install it manually.
+
+### Upgrading
+
+```bash
+npm i -g @bizhou/cli@latest          # npm
+brew update && brew upgrade bizhou   # Homebrew
+scoop update bizhou                  # Scoop
+```
+
+`bz` **never checks for updates and never self-updates** — sending no beacon of any kind is a deliberate design choice (see the [security model](./security.html)); upgrades are driven entirely by your package manager. Per-version changes, the compatibility promise, and downloads of older releases are on [Versions & compatibility](./versions.html).
+
+> **Coming from v1.0.x**: after upgrading, run `bz vault sync` once to put an encrypted copy of your vault in the cloud — the prerequisite for "a new machine needs only your master password". Skipping it still works, but a new machine, a reinstall, or a dead disk will lock your cloud data permanently.
 
 ### B. From source (development / early access)
 
