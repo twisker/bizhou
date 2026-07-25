@@ -48,9 +48,10 @@ recovery key   ──────────▶ KEK_rk ─┘
 - Cloud / MITM **reading content**: only ciphertext; GCM guarantees confidentiality.
 - Cloud **tampering with content**: GCM tag failure errors out, never returning corrupt data; chunk AAD binds `(bundleId, seq)` to prevent reordering/splicing; downloads also do an end-to-end contentId check.
 - **Confirmation attacks**: the content fingerprint is a keyed HMAC stored only in the encrypted encMeta, so an attacker holding a candidate plaintext cannot confirm you stored it.
-- **New/lost machine**: keys aren't in the cloud; a new machine just re-enters the master password.
+- **Data exposure from a lost machine**: keys are never in the cloud and the cloud holds only ciphertext; whoever finds your old machine still cannot open anything without your master password.
 
 **Does not protect against (out of scope):**
+- ⚠️ **Losing your local vault file**: `vault.json` lives only in the key root (`~/.bizhou` by default) and is **never uploaded**. Lose it and **both your master password and your recovery key become useless** — the recovery key unwraps the ciphertext held in that very file. **Back up your key root** before switching machines or reinstalling, and keep the backup separate from your recovery key. This is an availability failure rather than a confidentiality one, but the outcome is the same: data permanently unreadable. See [FAQ · I switched computers](./faq.html). (v1.1.0 plans an encrypted cloud vault to remove this risk.)
 - **A compromised device**: the master password/master key live in local memory and keychain; if the host is owned, so are you.
 - **A weak master password brute-forced**: use a strong one (scrypt raises the cost but can't save a too-weak password).
 - **Metadata inference**: chunk counts/sizes, directory structure, etc. are observable side channels (see the table above).

@@ -9,8 +9,29 @@ nav_order: 8
 ### I forgot my master password. Now what?
 Use `bz recover` + the **recovery key** generated at init to reset the master password. **Lose both** = data undecryptable (inevitable with end-to-end encryption). Always store the recovery key offline.
 
+⚠️ Note: the recovery key only works while the **vault file `vault.json` still exists** (in `~/.bizhou` by default). That file *is* the ciphertext your recovery key unwraps — lose it and the recovery key has nothing to act on. See the next entry.
+
 ### I switched computers / reinstalled — is my data still there?
-Yes. Keys aren't in the cloud; on a new machine, `bz login` + your master password gives you access to all resources.
+
+⚠️ **Yes, but only if you bring your key root with you.**
+
+The vault file `vault.json` — holding the salt for your master password and the master key wrapped twice, once by that password and once by your recovery key — lives **only** in your local key root (`~/.bizhou` by default, overridable with `BIZHOU_HOME`) and is **never uploaded to the cloud**. Without that file, **neither your master password nor your recovery key opens anything**: running `bz init` on the new machine just mints a brand-new master key that cannot decrypt any resource you already have.
+
+**Do this now:**
+
+```bash
+# Back up the whole key root somewhere you trust (USB stick, offline disk, another machine)
+cp -a ~/.bizhou ~/bizhou-keyroot-backup
+
+# At minimum, keep a separate copy of the vault file
+cp ~/.bizhou/vault.json ~/vault-backup.json
+```
+
+Keep that backup **separate from your recovery key** — storing both together is like locking the key inside the safe.
+
+**To move machines:** put the backed-up `~/.bizhou` (or at least `vault.json`) at the same path on the new machine → `bz login` → enter your master password → everything is available.
+
+> v1.1.0 plans to store an encrypted vault in the cloud (ciphertext only — still unopenable without your master password or recovery key), after which moving machines will need only the master password. Until then, **backing up your key root is the only safeguard**.
 
 ### What can others see in my Baidu Netdisk?
 A bunch of randomly-named `.bz` folders (the directory structure you created is visible) containing ciphertext chunks. Not the original filenames, content, or sizes. See [Security model](./security.html).
