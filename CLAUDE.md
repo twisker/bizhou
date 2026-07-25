@@ -7,8 +7,8 @@
 **敝帚（Bìzhǒu）** — 开源、跨平台的**客户端加密引擎 + CLI（`bz`）**：上传前本地端到端加密，云端只存密文；取回自动解密还原、字节级一致。
 
 - 项目代号：`bizhou`（CLI 命令 `bz`）
-- 版本：见根 `VERSION`（**当前 1.0.0**，首个正式版；每次 commit 由 `scripts/bump-version.sh` 自动同步 VERSION + 所有 package.json 的 patch。发版类"仅版本/仅文档"提交用 `--no-verify` 保号）
-- 当前阶段：**M0 + M1 + v2 云端 FS 层 + Phase 3（S1 健壮上传 / S2 健壮下载 / D1 备份守护 / C1 shell 补全 / P1 多类型预览）全部完成**，`bun test` 全绿（200+）；**已定版 v1.0.0，准备发版**。命令全集见 `.claude/module-spec-registry.md`（进度见 `.claude/current-sprint.md`）
+- 版本：见根 `VERSION`（**v1.0.0 已发布，v1.1.0 待发**；每次 commit 由 `scripts/bump-version.sh` 自动同步 VERSION + 所有 package.json 的 patch。发版类"仅版本/仅文档"提交用 `--no-verify` 保号）
+- 当前阶段：**M0 + M1 + v2 云端 FS 层 + Phase 3 全部完成，v1.0.0 已发布**；**v1.1.0（云端保险库 E-2~E-7，来自下游自珍 GUI 的引擎需求）开发完成、待人工发版**。`bun test` 全绿（300+）。命令全集见 `.claude/module-spec-registry.md`（进度见 `.claude/current-sprint.md`）
 - 技术栈：TypeScript + Bun（兼容 Node LTS）· pnpm monorepo（`@bizhou/core` + `bz`）· 授权 Apache-2.0
 
 ## 核心文档索引

@@ -61,7 +61,9 @@
 | `xpan/file` · create | 合并落盘到 `/apps/bizhou/<bundle>/NNN.part` | 已实现（mock 测试），联网待验 |
 | `xpan/file` · list | 列出 `/apps/bizhou/` 下的 bundle | 已实现，联网待验 |
 | `xpan/multimedia` · filemetas + dlink | 取下载直链 | 已实现，联网待验 |
-| `xpan/file` · filemanager(delete) | 删除资源 | 已实现，联网待验 |
+| `xpan/file` · filemanager(delete) | 删除资源、清空 `.trash` | 已实现，联网待验 |
+| `xpan/file` · filemanager(move) | 回收站移入 / 还原（E-6 的 `.trash` 方案） | 已实现（假网盘测试），**联网待验** |
+| `/api/quota` | 网盘总量/已用（E-7；注意不在 xpan 命名空间下） | 已实现（mock 测试），**联网待验** |
 | download（dlink） | 下载分片与预览包 | 已实现，联网待验 |
 
 ### 真实端点接线验证（2026-07-23，未授权探测，不发 secret）
@@ -100,7 +102,7 @@
 对 PRD §7 信封加密的稳健化落地，已实现于 `packages/core/src/vault`：
 
 ```
-主密码 ──scrypt(N=2^15,r=8,p=1,NFKC,加盐)──▶ KEK_pw ─┐
+主密码 ──scrypt(N=2^17,r=8,p=1,NFKC,加盐)──▶ KEK_pw ─┐   ← v1.1.0 起，老 vault 仍用其自带参数
                                                       ├─包裹─▶ MK（随机主密钥）──包裹─▶ 各资源 DEK
 恢复密钥(32B 随机, base32 展示) = KEK_rk ──────────────┘
 ```
@@ -111,6 +113,21 @@
 - **与 PRD 差异**：原 PRD 将 DEK 直接用主密码 KEK 包裹、KDF/盐入 manifest；现改为 DEK 由 MK 包裹、KDF/盐入 vault，故 manifest 不再含 kdf/salt。差异已在此登记。
 - **分片 AAD**：每分片以 `bundleId:seq` 作为 GCM AAD，绑定密文位置，防跨资源/乱序移花接木。
 - **token 存储**：设备密钥（首次随机、0600）AES-256-GCM 加密 `secrets.enc`（`FileSecretStore`）；OS 钥匙串后端可实现同接口后替换。
+
+### 5.1.2 云端保险库与 KDF 提参（v1.1.0，E-2/E-3/E-4/E-5）
+
+**vault 上云（E-2）**：`vault.json` 原样上传到 `/apps/bizhou/<不透明名>`（`vault/cloud.ts`）。不做二次加密——vault 本身就是密文信封（只含两份被包裹的 MK + KDF 参数与盐），再套一层只会引入「这层的密钥存哪」的循环问题。
+
+- `fetchCloudVault` **只在云端确实没有时返回 `null`**；解析失败、字段残缺、网络/鉴权失败一律抛错。理由（承重）：换机流程用 `null` 判定「新用户」并进而 `bz init` 铸造新 MK；把失败退化成 `null` 会让老用户在新机上被误判，云端已有文件永久不可解。同一条约束在 `BaiduBackend.findBlobEntry` 里以 errno 粒度落实。
+- 改密（`passwd`）、恢复密钥重设（`recover`）、恢复密钥轮换（`vault recovery-key --rotate`）之后**必须重传**，否则换机取回的是只认旧密码/旧恢复密钥的旧密文。上传失败一律显式告警并指向 `bz vault sync`，绝不静默。
+
+**KDF 提参（E-3）**：`DEFAULT_SCRYPT.N` 由 2^15（32 MiB）提升至 **2^17（128 MiB）**。动因是上云改变了威胁模型——云服务商直接持有密文、可离线无频率限制爆破，2^15 属「文件不出设备」时代的交互式登录档位。**向前兼容**：KDF 参数存在每个 vault 文件内，解锁用 `vault.kdf` 而非该常量，老 vault 永远用自己的参数，无迁移。
+
+**强度关卡（E-2 配套）**：`vault/strength.ts` 的 `assessPasswordStrength` 是零依赖的**保守**估算器（字符池 × 有效长度，扣重复/序列，命中常见弱口令基底直接压到 20 bit），门槛 `MIN_PASSWORD_LENGTH=12` + `MIN_PASSWORD_BITS=60`。`bz init` / `bz vault sync` 拦截式使用；`--no-cloud-vault` 是唯一的绕过方式，且必须显式告知「换机数据永久锁死」。引擎内实现是为了让 CLI 与自珍 GUI 用**同一把尺子**。
+
+**不透明命名（E-4）**：`backend/reserved.ts` 的 `CLOUD_VAULT_NAME`。**明确不是安全边界**——引擎开源、命名规则公开；只降低朴素模式匹配命中率。该值**发布后不可再改**（换机靠固定路径发现保险库，改名等于让存量用户的云端副本变成孤儿）。
+
+**恢复密钥重导出（E-5）**：vault 增加可选字段 `wrappedRecoveryByMk = wrapKey(MK, recoveryRaw)`。安全条件：导出入口**强制重输主密码**，不接受「会话已解锁」——恢复密钥是改密也撤销不掉的长期通行证。`rotateRecoveryKey` 先 `verifyMk` 再重写，防止用错 MK 覆盖唯一的备用入口。老 vault 无此字段，只能轮换。
 
 ### 5.1.1 确定性分片 IV（断点续传所需，安全红线留痕）
 
