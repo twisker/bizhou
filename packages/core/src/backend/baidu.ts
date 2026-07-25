@@ -1,4 +1,9 @@
-import { APP_ROOT, type BaiduClient, type RemoteEntry } from "../baidu/client.ts";
+import {
+  APP_ROOT,
+  type BaiduClient,
+  ERRNO_PATH_NOT_FOUND,
+  type RemoteEntry,
+} from "../baidu/client.ts";
 import { BaiduBundleStore } from "../baidu/store.ts";
 import { BUNDLE_SUFFIX } from "../bundle/index.ts";
 import {
@@ -7,7 +12,7 @@ import {
   cloudDirname,
   normalizeCloudPath,
 } from "../cloudpath/index.ts";
-import { BizhouError } from "../errors.ts";
+import { BaiduApiError, BizhouError } from "../errors.ts";
 import type { Backend, DirListing, TrashEntry } from "./index.ts";
 
 /** 百度开放平台未提供回收站管理接口（list/restore/delete/clear），只能靠 App/网页兜底。 */
@@ -83,9 +88,24 @@ export class BaiduBackend implements Backend {
 
   /**
    * 定位 cloudPath 对应的远端条目：list 父目录后按文件名匹配。
-   * 找不到（含父目录本身不存在——百度 list 对不存在目录会抛错）一律按"没有此 blob"
-   * 处理，返回 undefined；这与 listDir 对不存在目录的既有语义一致（见 local.ts / baidu.ts listDir）。
-   * 真正的网络/鉴权失败会在下一步 filemetas/download/uploadPart 里如实抛出。
+   *
+   * 为什么必须精确区分"父目录确实不存在"与"list 请求失败"（这条区分是承重的，
+   * 不要为了"简化"而合并回一律 catch→undefined）：
+   *
+   * T4 的换机流程用 getBlob(vault 路径) 判断"这台新机器上到底有没有已存在的保险库"：
+   *   本地无 vault → 查云端 getBlob(vault path)
+   *     ├─ 返回 vault → 用主密码解锁，取回全部资源
+   *     └─ 返回 null  → 当作新用户 → bz init → 生成全新主密钥（MK）
+   *
+   * 如果把"网络抖动/鉴权失败/限流等导致 list 失败"也吞成 undefined（进而 getBlob
+   * 返回 null），效果就是：老用户在新机器上仅仅因为一次网络抖动，就被误判为"没有
+   * vault"，bz init 会为其铸造一把全新的 MK，导致云端已有的全部文件永久无法解密——
+   * 这是不可逆的数据丢失，且恰恰是本次发版要防止的场景。一次误报的错误是可恢复的
+   * （用户重试即可），一次误报的"不存在"会摧毁数据，两者后果不对等。
+   *
+   * 因此：只有 errno === ERRNO_PATH_NOT_FOUND（父目录确实不存在）才当作"没有此
+   * blob"返回 undefined；其余任何失败（其它 errno、网络错误、鉴权失败、响应格式
+   * 异常……）一律原样抛出，交由调用方重试或报错，绝不能悄悄退化成"判定为空"。
    */
   private async findBlobEntry(cloudPath: string): Promise<RemoteEntry | undefined> {
     const dir = cloudDirname(cloudPath);
@@ -93,8 +113,11 @@ export class BaiduBackend implements Backend {
     let entries: RemoteEntry[];
     try {
       entries = await this.client.list(this.remote(dir));
-    } catch {
-      return undefined;
+    } catch (err) {
+      if (err instanceof BaiduApiError && err.errno === ERRNO_PATH_NOT_FOUND) {
+        return undefined;
+      }
+      throw err;
     }
     return entries.find((e) => !e.isdir && e.filename === name);
   }

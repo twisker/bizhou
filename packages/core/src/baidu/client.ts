@@ -7,13 +7,21 @@
  */
 
 import { createHash } from "node:crypto";
-import { BizhouError } from "../errors.ts";
+import { BaiduApiError, BizhouError } from "../errors.ts";
 import type { OAuthConfig } from "./oauth.ts";
 
 export const PAN_API = "https://pan.baidu.com/rest/2.0/xpan";
 export const PCS_SUPERFILE = "https://d.pcs.baidu.com/rest/2.0/pcs/superfile2";
 export const APP_ROOT = "/apps/bizhou";
 export const TRANSFER_SLICE = 4 * 1024 * 1024; // 云端原生 4MB 传输分片
+
+/**
+ * xpan `list`/`filemetas` 等接口对"路径不存在"返回的 errno。这是第三方对接项目
+ * （AlistGo/OpenListTeam 等）在生产环境里验证到的行为，百度官方文档未见正式列出，
+ * 因此只把它当作"确定不存在"的唯一识别信号——任何其它 errno（鉴权失败、限流、
+ * 参数错误……）都必须当作真失败处理，绝不可归入"不存在"。
+ */
+export const ERRNO_PATH_NOT_FOUND = -9;
 
 export interface HttpResponse {
   readonly ok: boolean;
@@ -136,7 +144,7 @@ export class BaiduClient {
     const data = (await res.json()) as Record<string, unknown>;
     const errno = data.errno;
     if (typeof errno === "number" && errno !== 0) {
-      throw new BizhouError("BAIDU", `百度文件 API 错误：method=${method} errno=${errno}`);
+      throw new BaiduApiError(errno, `百度文件 API 错误：method=${method} errno=${errno}`);
     }
     return data;
   }
