@@ -25,6 +25,7 @@ import {
   cmdPreview,
   cmdPull,
   cmdPush,
+  cmdQuota,
   cmdRecover,
   cmdRename,
   cmdRm,
@@ -55,6 +56,7 @@ const HELP = `敝帚 bz —— 客户端加密引擎 CLI
 账号:
   login [--name <n>] [--device] [--port <p>]   OAuth 登录百度
   logout                                       注销当前账号
+  quota                                        查看网盘总量 / 已用
   account [list|use <n>|add <n>]               多账号管理
 
 资源:
@@ -184,6 +186,9 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     case "logout":
       await cmdLogout(rt);
+      return 0;
+    case "quota":
+      await cmdQuota(rt, common);
       return 0;
     case "account":
       await cmdAccount(rt, positionals[1], positionals[2]);

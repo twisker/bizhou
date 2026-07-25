@@ -66,7 +66,13 @@ import { findSevenZip, sevenZipArchive } from "./export7z.ts";
 import { generatePreview } from "./preview.ts";
 import { readLineFromStdin, readPassword, resolveMasterPassword } from "./prompt.ts";
 import { c, endProgress, formatBytes, info, ok, out, renderProgress, warn } from "./render.ts";
-import { backendIfPossible, createRuntime, makeBackend, type Runtime } from "./runtime.ts";
+import {
+  backendIfPossible,
+  baiduClientForCurrent,
+  createRuntime,
+  makeBackend,
+  type Runtime,
+} from "./runtime.ts";
 
 export interface CommonOpts {
   local?: string;
@@ -421,6 +427,16 @@ async function cmdVaultRecoveryKey(
   }
   warn("以下是你的恢复密钥（与初始化时那串相同），请离线妥善保管：");
   out(c.bold(exportRecoveryKey(vault, mk)));
+}
+
+/** `bz quota`：网盘总量 / 已用（E-7）。仅百度后端有配额概念。 */
+export async function cmdQuota(rt: Runtime, opts: CommonOpts): Promise<void> {
+  if (opts.local) {
+    throw new BizhouError("INVALID_ARG", "`--local` 后端没有配额概念（那是本地目录）");
+  }
+  const { total, used } = await (await baiduClientForCurrent(rt)).getQuota();
+  const pct = total > 0 ? ((used / total) * 100).toFixed(1) : "0.0";
+  out(`已用 ${formatBytes(used)} / 共 ${formatBytes(total)}（${pct}%）`);
 }
 
 // ---- login / logout / account --------------------------------------------

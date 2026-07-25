@@ -12,6 +12,8 @@ import type { OAuthConfig } from "./oauth.ts";
 
 export const PAN_API = "https://pan.baidu.com/rest/2.0/xpan";
 export const PCS_SUPERFILE = "https://d.pcs.baidu.com/rest/2.0/pcs/superfile2";
+/** 配额接口不在 xpan 命名空间下，是独立的 /api/quota。 */
+export const PAN_QUOTA_API = "https://pan.baidu.com/api/quota";
 export const APP_ROOT = "/apps/bizhou";
 export const TRANSFER_SLICE = 4 * 1024 * 1024; // 云端原生 4MB 传输分片
 
@@ -329,6 +331,34 @@ export class BaiduClient {
   /** 原地改名（同目录下改末段名）。 */
   async rename(srcPath: string, newName: string): Promise<void> {
     await this.fileManagerOp("rename", [{ path: srcPath, newname: newName }]);
+  }
+
+  /**
+   * 网盘配额（E-7）：返回总量与已用字节。
+   *
+   * 失败一律抛错，绝不回落成 0——这个数字要直接显示给用户，`0` 会被读成
+   * "网盘是空的"或"一点空间都没有"，比一条报错难排查得多。
+   */
+  async getQuota(): Promise<{ total: number; used: number }> {
+    const url = `${PAN_QUOTA_API}?${form({
+      access_token: this.accessToken,
+      checkfree: "1",
+      checkexpire: "1",
+    })}`;
+    // 只对传输层退避重试。errno 与字段缺失是确定性的答复，重试三次只是白等 1.5 秒
+    // 并多打三次接口，答案不会变。
+    const data = await withRetry(
+      async () => (await this.http(url)).json() as Promise<Record<string, unknown>>,
+      { tries: this.maxRetries },
+    );
+    const errno = data.errno;
+    if (typeof errno === "number" && errno !== 0) {
+      throw new BaiduApiError(errno, `配额查询失败 errno=${errno}`);
+    }
+    if (typeof data.total !== "number" || typeof data.used !== "number") {
+      throw new BizhouError("BAIDU", "配额查询返回的字段不完整（缺 total/used）");
+    }
+    return { total: data.total, used: data.used };
   }
 
   /** 创建目录（xpan create isdir=1，等价 mkdir -p）。 */

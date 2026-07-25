@@ -64,6 +64,7 @@ export const COMMANDS: CommandSpec[] = [
     args: [],
   },
   { name: "logout", flags: [], args: [] },
+  { name: "quota", flags: [], args: [] },
   {
     name: "account",
     flags: [],
