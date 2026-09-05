@@ -317,6 +317,27 @@ describe("filemanager move/copy/rename", () => {
   });
 });
 
+describe("小片级上传进度（E-10）", () => {
+  test("putChunk 把 uploadPart 的每片完成折算成本逻辑分片内的字节进度，单调不减", async () => {
+    const data = Buffer.alloc(4 * 1024 * 1024 * 3 + 100, 7); // 3 片整 + 1 片零头
+    const http: HttpClient = async (url) => {
+      if (url.includes("method=precreate")) return jsonRes({ errno: 0, uploadid: "U", block_list: [0, 1, 2, 3] });
+      if (url.includes("method=create")) return jsonRes({ errno: 0, fs_id: 1 });
+      return jsonRes({ errno: 0, md5: "x" }); // superfile2 分片上传
+    };
+    const store = new BaiduBundleStore(new BaiduClient(CONFIG, "AT", http), "ab".repeat(16), "/d");
+    const events: { bytesDone: number; bytesTotal: number; seq: number }[] = [];
+    store.sliceProgress = (e) => events.push(e);
+    await store.putChunk(2, data);
+    expect(events.length).toBe(4);
+    expect(events.every((e) => e.seq === 2 && e.bytesTotal === data.length)).toBe(true);
+    for (let i = 1; i < events.length; i++) {
+      expect(events[i]!.bytesDone).toBeGreaterThan(events[i - 1]!.bytesDone);
+    }
+    expect(events[events.length - 1]!.bytesDone).toBe(data.length);
+  });
+});
+
 describe("filemanager 逐文件结果", () => {
   test("顶层 errno=0 但 info[].errno 非 0 → 抛 BaiduApiError（带该文件的 errno）", async () => {
     const http: HttpClient = async () =>
