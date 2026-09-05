@@ -17,6 +17,8 @@ import { APP_ROOT, type BaiduClient } from "./client.ts";
 
 export class BaiduBundleStore implements BundleStore {
   readonly bundleId: string;
+  /** 小片级上传进度（E-10），见 BundleStore 接口说明。 */
+  sliceProgress?: (event: { seq: number; bytesDone: number; bytesTotal: number }) => void;
   private readonly dir: string;
   private fsidCache: Map<string, number> | undefined;
 
@@ -61,7 +63,23 @@ export class BaiduBundleStore implements BundleStore {
   }
 
   async putChunk(seq: number, data: Buffer): Promise<void> {
-    await this.client.uploadPart(this.remotePath(chunkFileName(seq)), data);
+    const hook = this.sliceProgress;
+    let done = 0;
+    await this.client.uploadPart(
+      this.remotePath(chunkFileName(seq)),
+      data,
+      hook
+        ? (_partseq, total) => {
+            // 传输分片并发上传、完成顺序不定，按"完成了几片"折算字节，单调不减
+            done += 1;
+            hook({
+              seq,
+              bytesDone: Math.min(data.length, Math.round((done / total) * data.length)),
+              bytesTotal: data.length,
+            });
+          }
+        : undefined,
+    );
     this.fsidCache = undefined; // 上传后缓存失效
   }
 

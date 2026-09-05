@@ -300,13 +300,43 @@ export class BaiduClient {
     }));
   }
 
-  /** filemanager 通用封装：POST filemanager?opera=... body async=0&filelist=[...]。 */
+  /**
+   * filemanager 通用封装：POST filemanager?opera=... body async=0&filelist=[...]。
+   *
+   * ⚠️ 这个接口的失败**藏在逐文件结果里**：顶层 `errno` 为 0 只表示"请求收到了"，
+   * 每个文件自己的结果在 `info[].errno`（-9 源不存在、-8 目标已存在、12 批量操作失败、
+   * 111 有其他异步任务在跑……）。只看顶层会把"移动没成功"当成成功——下游自珍 GUI
+   * 2026-09-06 真机实测：移动文件无任何报错，文件却纹丝不动，就是这里吞掉的。
+   *
+   * 另一种"顶层 0 但没做完"：网盘把操作转成了异步任务，只回 `taskid`、`info` 为空。
+   * 我们明确要求 async=0，理论上不该发生；真发生了也不能装作成功——如实抛出，
+   * 让调用方重试或稍后刷新，而不是让用户对着一个没变的列表怀疑自己。
+   */
   private async fileManagerOp(opera: string, filelist: unknown[]): Promise<void> {
-    await this.fileApi(
+    const data = await this.fileApi(
       "filemanager",
       { opera },
       form({ async: "0", filelist: JSON.stringify(filelist), ondup: "fail" }),
     );
+    const info = Array.isArray(data.info) ? (data.info as Record<string, unknown>[]) : null;
+    if (info) {
+      for (const item of info) {
+        const errno = item.errno;
+        if (typeof errno === "number" && errno !== 0) {
+          throw new BaiduApiError(
+            errno,
+            `百度文件操作失败：opera=${opera} errno=${errno} path=${String(item.path ?? "")}`,
+          );
+        }
+      }
+      return;
+    }
+    if (data.taskid !== undefined) {
+      throw new BizhouError(
+        "BAIDU",
+        `百度把 ${opera} 转成了异步任务（taskid=${String(data.taskid)}），结果尚未确认；请稍后刷新或重试`,
+      );
+    }
   }
 
   /** 删除远端路径（文件或目录）。 */

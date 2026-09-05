@@ -582,10 +582,11 @@ async function findDuplicateBundle(
       } catch {
         continue; // 该 bundle 尚不完整（无 manifest）→ 跳过
       }
-      await putCachedManifest(rt.paths.dir, b.id, raw);
     }
     try {
       const m = parseManifest(raw);
+      if (m.pending) continue; // 上传中的资源（E-11）：不算重复，也不缓存——它还会变
+      await putCachedManifest(rt.paths.dir, b.id, raw);
       const meta = openMeta(unwrapDek(mk, m.wrappedKey), m.encMeta);
       if (meta.contentId === targetContentId) return b.id;
     } catch {}
@@ -1151,9 +1152,9 @@ export async function cmdLs(
       printedAny = true;
       try {
         const store = backend.bundleStore(b.id, dir);
-        const { meta } = await readResourceMeta(mk, store);
+        const { manifest, meta } = await readResourceMeta(mk, store);
         out(
-          `${"  ".repeat(depth)}${c.dim(b.id.slice(0, 12))}  ${formatBytes(meta.size).padStart(10)}  ${meta.name}`,
+          `${"  ".repeat(depth)}${c.dim(b.id.slice(0, 12))}  ${formatBytes(meta.size).padStart(10)}  ${meta.name}${manifest.pending ? c.yellow("  (上传中)") : ""}`,
         );
       } catch {
         out(`${"  ".repeat(depth)}${c.dim(b.id.slice(0, 12))}  ${c.yellow("(无法读取)")}`);

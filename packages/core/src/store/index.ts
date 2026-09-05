@@ -28,6 +28,16 @@ export interface BundleStore {
   listChunks(): Promise<number[]>;
   /** 删除整个 bundle。 */
   remove(): Promise<void>;
+  /**
+   * 可选：单个逻辑分片内部的传输进度（E-10）。
+   *
+   * 逻辑分片默认 100MB，`ProgressEvent` 只在每片完成时发一次；一个 12GB 的文件在最初
+   * 的一百多兆里界面上毫无动静，用户会以为程序死了（下游自珍 GUI 真机反馈）。
+   * 百度后端实际按 4MB 传输分片上传，这个钩子把那一层的进度露出来：`bytesDone` /
+   * `bytesTotal` 是**当前这个逻辑分片**内已传 / 总字节。本地后端没有中间过程，不会调用。
+   * 由消费方在 store 上赋值；不赋值即无开销。
+   */
+  sliceProgress?: (event: { seq: number; bytesDone: number; bytesTotal: number }) => void;
 }
 
 /** 本地目录实现：baseDir/<id>.bz/ 下写 000.part / manifest.json / preview.part。 */

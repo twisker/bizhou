@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateBundleId } from "../src/bundle/index.ts";
+import { BaiduApiError } from "../src/errors.ts";
 import {
   APP_ROOT,
   BaiduClient,
@@ -183,6 +184,10 @@ describe("BaiduBundleStore 端到端（模拟网盘 + 真实加密管线）", ()
 
     const http: HttpClient = async (url, init) => {
       if (url.includes("method=precreate")) {
+        // 真网盘 rtype=3 是覆盖写：同一路径再次 precreate 就从空开始（manifest 会先写
+        // 未完成版、传完再覆盖，E-11）
+        const path = decodeURIComponent(String(init!.body).match(/path=([^&]+)/)![1]!);
+        disk.delete(path);
         return jsonRes({ errno: 0, uploadid: `up-${Math.random()}`, block_list: [0] });
       }
       if (url.includes("superfile2")) {
@@ -313,6 +318,57 @@ describe("filemanager move/copy/rename", () => {
     expect(seenUrl).toContain("opera=rename");
     const filelist = JSON.parse(decodeURIComponent(seenBody).match(/filelist=([^&]+)/)![1]!);
     expect(filelist).toEqual([{ path: `${APP_ROOT}/a/x.bz`, newname: "y.bz" }]);
+  });
+});
+
+describe("小片级上传进度（E-10）", () => {
+  test("putChunk 把 uploadPart 的每片完成折算成本逻辑分片内的字节进度，单调不减", async () => {
+    const data = Buffer.alloc(4 * 1024 * 1024 * 3 + 100, 7); // 3 片整 + 1 片零头
+    const http: HttpClient = async (url) => {
+      if (url.includes("method=precreate")) return jsonRes({ errno: 0, uploadid: "U", block_list: [0, 1, 2, 3] });
+      if (url.includes("method=create")) return jsonRes({ errno: 0, fs_id: 1 });
+      return jsonRes({ errno: 0, md5: "x" }); // superfile2 分片上传
+    };
+    const store = new BaiduBundleStore(new BaiduClient(CONFIG, "AT", http), "ab".repeat(16), "/d");
+    const events: { bytesDone: number; bytesTotal: number; seq: number }[] = [];
+    store.sliceProgress = (e) => events.push(e);
+    await store.putChunk(2, data);
+    expect(events.length).toBe(4);
+    expect(events.every((e) => e.seq === 2 && e.bytesTotal === data.length)).toBe(true);
+    for (let i = 1; i < events.length; i++) {
+      expect(events[i]!.bytesDone).toBeGreaterThan(events[i - 1]!.bytesDone);
+    }
+    expect(events[events.length - 1]!.bytesDone).toBe(data.length);
+  });
+});
+
+describe("filemanager 逐文件结果", () => {
+  test("顶层 errno=0 但 info[].errno 非 0 → 抛 BaiduApiError（带该文件的 errno）", async () => {
+    const http: HttpClient = async () =>
+      jsonRes({ errno: 0, info: [{ errno: -9, path: `${APP_ROOT}/a/x.bz` }], request_id: 1 });
+    const client = new BaiduClient(CONFIG, "AT", http);
+    let caught: unknown;
+    try {
+      await client.move(`${APP_ROOT}/a/x.bz`, `${APP_ROOT}/b`);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(BaiduApiError);
+    expect((caught as BaiduApiError).errno).toBe(-9);
+    expect(String((caught as Error).message)).toContain("opera=move");
+  });
+
+  test("info 全部 errno=0 → 成功返回", async () => {
+    const http: HttpClient = async () =>
+      jsonRes({ errno: 0, info: [{ errno: 0, path: `${APP_ROOT}/a/x.bz` }] });
+    await new BaiduClient(CONFIG, "AT", http).rename(`${APP_ROOT}/a/x.bz`, "y.bz");
+  });
+
+  test("只回 taskid、没有 info → 不能当成功，明确抛出", async () => {
+    const http: HttpClient = async () => jsonRes({ errno: 0, taskid: 42 });
+    await expect(
+      new BaiduClient(CONFIG, "AT", http).copy(`${APP_ROOT}/a/x.bz`, `${APP_ROOT}/z`),
+    ).rejects.toThrow(/异步任务/);
   });
 });
 
