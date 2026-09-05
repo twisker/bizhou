@@ -184,6 +184,10 @@ describe("BaiduBundleStore 端到端（模拟网盘 + 真实加密管线）", ()
 
     const http: HttpClient = async (url, init) => {
       if (url.includes("method=precreate")) {
+        // 真网盘 rtype=3 是覆盖写：同一路径再次 precreate 就从空开始（manifest 会先写
+        // 未完成版、传完再覆盖，E-11）
+        const path = decodeURIComponent(String(init!.body).match(/path=([^&]+)/)![1]!);
+        disk.delete(path);
         return jsonRes({ errno: 0, uploadid: `up-${Math.random()}`, block_list: [0] });
       }
       if (url.includes("superfile2")) {

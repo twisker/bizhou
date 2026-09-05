@@ -60,18 +60,6 @@ export async function packResource(opts: PackOptions): Promise<Manifest> {
   const compression = opts.compression ?? "none";
   const dek = opts.dek ?? generateKey();
 
-  const chunks = await encryptFileToChunks({
-    filePath: opts.filePath,
-    fileSize: opts.fileSize,
-    dek,
-    bundleId: opts.bundleId,
-    chunkSize,
-    compression,
-    store: opts.store,
-    onProgress: opts.onProgress,
-    skipExisting: opts.skipExisting,
-  });
-
   const meta: ResourceMeta = {
     name: opts.name ?? basename(opts.filePath),
     size: opts.fileSize,
@@ -79,7 +67,19 @@ export async function packResource(opts: PackOptions): Promise<Manifest> {
     ...(opts.contentType ? { contentType: opts.contentType } : {}),
     ...(opts.contentId ? { contentId: opts.contentId } : {}),
   };
+  const base = {
+    version: 1 as const,
+    bundleId: opts.bundleId,
+    createdAt: opts.createdAt,
+    cipher: "AES-256-GCM" as const,
+    compression,
+    chunkSize,
+    wrappedKey: wrapDek(opts.mk, dek),
+    encMeta: sealMeta(dek, meta),
+  };
 
+  // 预览包先传（E-11 顺带）：它很小、由调用方在分片前就生成好了，先上去，别的客户端在
+  // 上传期间就能看预览，只是不能取回。
   let previewInfo: Manifest["preview"];
   if (opts.preview) {
     const { iv, ciphertext, tag } = aeadEncrypt(dek, opts.preview.data);
@@ -92,27 +92,51 @@ export async function packResource(opts: PackOptions): Promise<Manifest> {
     };
   }
 
-  const manifest: Manifest = {
-    version: 1,
+  // E-11：先写一份未完成 manifest（真名、大小、预览已在，分片列表为空、pending=true）。
+  // 大文件要传很久，这段时间里别的客户端（甚至别的设备）列目录时读到它就知道这是什么、
+  // 还没传完，而不是一个读不出来的空壳。续传时这一步会重写一次同样的内容，无害。
+  await opts.store.putManifest(
+    serializeManifest({
+      ...base,
+      chunks: [],
+      ...(previewInfo ? { preview: previewInfo } : {}),
+      pending: true,
+    }),
+  );
+
+  const chunks = await encryptFileToChunks({
+    filePath: opts.filePath,
+    fileSize: opts.fileSize,
+    dek,
     bundleId: opts.bundleId,
-    createdAt: opts.createdAt,
-    cipher: "AES-256-GCM",
-    compression,
     chunkSize,
-    wrappedKey: wrapDek(opts.mk, dek),
+    compression,
+    store: opts.store,
+    onProgress: opts.onProgress,
+    skipExisting: opts.skipExisting,
+  });
+
+  const manifest: Manifest = {
+    ...base,
     chunks,
     ...(previewInfo ? { preview: previewInfo } : {}),
-    encMeta: sealMeta(dek, meta),
   };
   await opts.store.putManifest(serializeManifest(manifest));
   return manifest;
 }
 
 /** 下载并解密预览包。资源无预览时抛错。 */
+function assertComplete(manifest: Manifest, what: string): void {
+  if (manifest.pending) {
+    throw new BizhouError("BUNDLE", `该资源尚未上传完成，暂不能${what}`);
+  }
+}
+
 export async function openPreview(
   mk: Buffer,
   store: BundleStore,
 ): Promise<{ kind: PreviewKind; data: Buffer }> {
+  // 预览在上传一开始就传好了（E-11），未完成的资源也能预览
   const manifest = parseManifest(await store.getManifest());
   if (!manifest.preview) {
     throw new BizhouError("BUNDLE", "该资源没有预览包");
@@ -146,6 +170,7 @@ export interface UnpackResult {
 /** 从 store 读 manifest → 解 DEK → 解 encMeta → 逐片还原到 outPath。 */
 export async function unpackResource(opts: UnpackOptions): Promise<UnpackResult> {
   const manifest = parseManifest(await opts.store.getManifest());
+  assertComplete(manifest, "取回");
   const dek = unwrapDek(opts.mk, manifest.wrappedKey);
   const meta = openMeta(dek, manifest.encMeta);
   const { bytesWritten } = await decryptChunksToFile({

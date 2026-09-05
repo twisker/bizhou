@@ -61,6 +61,13 @@ export interface Manifest {
   readonly chunks: readonly ChunkInfo[];
   readonly preview?: PreviewInfo;
   readonly encMeta: string; // DEK 加密的 ResourceMeta（base64 blob）
+  /**
+   * 未完成标记（E-11）：上传一开始就先写一份带真名与大小、`chunks` 为空的 manifest，
+   * 传完再用最终版覆盖。任何客户端（包括别的设备）读到 pending 就知道"这是什么、还没传完"；
+   * `unpackResource` / `openPreview` 遇到它明确拒绝，去重扫描与 manifest 缓存都应跳过它。
+   * 最终版 manifest **没有**这个字段。
+   */
+  readonly pending?: true;
 }
 
 /** 生成不透明 bundle ID（不含原文件名）。16 字节随机 → 32 位 hex。 */
@@ -128,6 +135,7 @@ export function serializeManifest(m: Manifest): string {
     })),
     ...(m.preview ? { preview: m.preview } : {}),
     encMeta: m.encMeta,
+    ...(m.pending ? { pending: true } : {}),
   };
   return JSON.stringify(ordered, null, 2);
 }
@@ -211,6 +219,10 @@ export function parseManifest(json: string): Manifest {
     };
   }
 
+  if (o.pending !== undefined && o.pending !== true) {
+    throw new ManifestError("manifest.pending 若存在必须为 true");
+  }
+
   return {
     version: MANIFEST_VERSION,
     bundleId: req(o, "bundleId", "string") as string,
@@ -222,5 +234,6 @@ export function parseManifest(json: string): Manifest {
     chunks,
     ...(preview ? { preview } : {}),
     encMeta: req(o, "encMeta", "string") as string,
+    ...(o.pending === true ? { pending: true as const } : {}),
   };
 }
