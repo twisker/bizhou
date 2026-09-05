@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateBundleId } from "../src/bundle/index.ts";
+import { BaiduApiError } from "../src/errors.ts";
 import {
   APP_ROOT,
   BaiduClient,
@@ -313,6 +314,36 @@ describe("filemanager move/copy/rename", () => {
     expect(seenUrl).toContain("opera=rename");
     const filelist = JSON.parse(decodeURIComponent(seenBody).match(/filelist=([^&]+)/)![1]!);
     expect(filelist).toEqual([{ path: `${APP_ROOT}/a/x.bz`, newname: "y.bz" }]);
+  });
+});
+
+describe("filemanager 逐文件结果", () => {
+  test("顶层 errno=0 但 info[].errno 非 0 → 抛 BaiduApiError（带该文件的 errno）", async () => {
+    const http: HttpClient = async () =>
+      jsonRes({ errno: 0, info: [{ errno: -9, path: `${APP_ROOT}/a/x.bz` }], request_id: 1 });
+    const client = new BaiduClient(CONFIG, "AT", http);
+    let caught: unknown;
+    try {
+      await client.move(`${APP_ROOT}/a/x.bz`, `${APP_ROOT}/b`);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(BaiduApiError);
+    expect((caught as BaiduApiError).errno).toBe(-9);
+    expect(String((caught as Error).message)).toContain("opera=move");
+  });
+
+  test("info 全部 errno=0 → 成功返回", async () => {
+    const http: HttpClient = async () =>
+      jsonRes({ errno: 0, info: [{ errno: 0, path: `${APP_ROOT}/a/x.bz` }] });
+    await new BaiduClient(CONFIG, "AT", http).rename(`${APP_ROOT}/a/x.bz`, "y.bz");
+  });
+
+  test("只回 taskid、没有 info → 不能当成功，明确抛出", async () => {
+    const http: HttpClient = async () => jsonRes({ errno: 0, taskid: 42 });
+    await expect(
+      new BaiduClient(CONFIG, "AT", http).copy(`${APP_ROOT}/a/x.bz`, `${APP_ROOT}/z`),
+    ).rejects.toThrow(/异步任务/);
   });
 });
 
